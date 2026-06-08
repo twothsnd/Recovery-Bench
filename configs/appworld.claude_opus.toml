@@ -1,0 +1,25 @@
+[experiment]
+output_dir = "runs/appworld-claude-opus"
+k_values = [1, 2, 3]
+task_ids = []
+
+[benchmark]
+name = "appworld"
+
+[benchmark.options]
+source_path = "external/appworld/runtime"
+dataset_name = "test_challenge"
+experiment_name = "recovery-bench"
+
+[agent]
+name = "anthropic-agent"
+
+[agent.options]
+max_steps = 50
+
+[model]
+name = "claude-opus-4-1-20250805"
+provider = "anthropic"
+
+[model.options]
+max_tokens = 4096

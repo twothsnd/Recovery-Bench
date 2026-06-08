@@ -1,0 +1,34 @@
+[experiment]
+output_dir = "runs/tau-bench-gpt-4.1"
+k_values = [1, 2, 3]
+task_ids = []
+
+[benchmark]
+name = "tau-bench"
+
+[benchmark.options]
+# Optional source checkout downloaded with scripts/download_benchmark_archive.sh.
+source_path = "external/tau-bench/src"
+domain = "airline"
+solo_mode = false
+
+# Default recovery uses the same live Gym environment between failed attempts.
+# Set to "replay" only after validating replay restore against the installed tau2-bench version.
+restore_mode = "live"
+
+# τ-bench's official user simulator is also LLM-backed. The adapter fills
+# user_llm_args api_key/api_base from Codex/OpenAI env when available.
+# user_llm = "anthropic/claude-sonnet-4-5"
+
+[agent]
+name = "openai-agent"
+
+[agent.options]
+max_steps = 200
+
+[model]
+name = "gpt-4.1"
+provider = "openai"
+
+[model.options]
+temperature = 0

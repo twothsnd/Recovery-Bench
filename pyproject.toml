@@ -1,0 +1,32 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "recovery-bench"
+version = "0.1.0"
+description = "Recovery@k evaluation framework for stateful agent benchmarks"
+readme = "recovery_at_k_plan.md"
+requires-python = ">=3.11"
+
+[project.optional-dependencies]
+enterpriseops-gym = [
+    "datasets>=4.5.0",
+    "pyarrow>=12.0.0",
+]
+osworld-fastvm = [
+    "fastvm>=0.7.0",
+]
+
+[project.scripts]
+recovery-bench = "recovery_bench.cli:main"
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+pythonpath = [".", "src"]
+testpaths = ["tests"]

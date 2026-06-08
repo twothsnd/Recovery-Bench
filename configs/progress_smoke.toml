@@ -1,0 +1,15 @@
+[experiment]
+output_dir = "runs/progress-smoke"
+k_values = [1, 2, 3]
+task_ids = ["progress-1"]
+
+[benchmark]
+name = "progress-smoke"
+
+[agent]
+name = "progress-smoke-agent"
+
+[model]
+name = "smoke-model"
+provider = "local"
+

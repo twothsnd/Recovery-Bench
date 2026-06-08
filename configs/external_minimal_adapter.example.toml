@@ -1,0 +1,16 @@
+[experiment]
+output_dir = "runs/external-minimal"
+k_values = [1, 2, 3]
+task_ids = ["minimal-recovery-1"]
+
+[benchmark]
+name = "external-minimal"
+import_path = "examples.adapters.minimal_recovery_adapter:build_benchmark"
+
+[agent]
+name = "external-minimal-agent"
+import_path = "examples.adapters.minimal_recovery_adapter:build_agent"
+
+[model]
+name = "none"
+provider = "local"

@@ -1,0 +1,99 @@
+[experiment]
+output_dir = "runs/osworld-qwen35-9b-vllm-remaining47"
+k_values = [1, 2]
+task_ids = [
+  "b070486d-e161-459b-aa2b-ef442d973b92",
+  "da46d875-6b82-4681-9284-653b0c7ae241",
+  "e1e75309-3ddb-4d09-92ec-de869c928143",
+  "2e6f678f-472d-4c55-99cc-8e7c5c402a71",
+  "38f48d40-764e-4e77-a7cf-51dfce880291",
+  "8ea73f6f-9689-42ad-8c60-195bbf06a7ba",
+  "f4aec372-4fb0-4df5-a52b-79e0e2a5d6ce",
+  "12382c62-0cd1-4bf2-bdc8-1d20bf9b2371",
+  "1d17d234-e39d-4ed7-b46f-4417922a4e7c",
+  "26a8440e-c166-4c50-aef4-bfb77314b46b",
+  "7efeb4b1-3d19-4762-b163-63328d66303b",
+  "aa3a8974-2e85-438b-b29e-a64df44deb4b",
+  "ecb0df7a-4e8d-4a03-b162-053391d3afaf",
+  "3161d64e-3120-47b4-aaad-6a764a92493b",
+  "57667013-ea97-417c-9dce-2713091e6e2a",
+  "7dbc52a6-11e0-4c9a-a2cb-1e36cfda80d8",
+  "9cf05d24-6bd9-4dae-8967-f67d88f5d38a",
+  "b8adbc24-cef2-4b15-99d5-ecbe7ff445eb",
+  "c82632a4-56b6-4db4-9dd1-3820ee3388e4",
+  "ed43c15f-00cb-4054-9c95-62c880865d68",
+  "0e763496-b6bb-4508-a427-fad0b6c3e195",
+  "3ef2b351-8a84-4ff2-8724-d86eae9b842e",
+  "6f81754e-285d-4ce0-b59e-af7edb02d108",
+  "26150609-0da3-4a7d-8868-0faf9c5f01bb",
+  "2c1ebcd7-9c6d-4c9a-afad-900e381ecd5e",
+  "337d318b-aa07-4f4f-b763-89d9a2dd013f",
+  "47f7c0ce-a5fb-4100-a5e6-65cd0e7429e5",
+  "5df7b33a-9f77-4101-823e-02f863e1c1ae",
+  "68a25bd4-59c7-4f4d-975e-da0c8509c848",
+  "873cafdd-a581-47f6-8b33-b9696ddb7b05",
+  "897e3b53-5d4d-444b-85cb-2cdc8a97d903",
+  "aad10cd7-9337-4b62-b704-a857848cedf2",
+  "aceb0368-56b8-4073-b70e-3dc9aee184e0",
+  "ce2b64a2-ddc1-4f91-8c7d-a88be7121aac",
+  "d1acdb87-bb67-4f30-84aa-990e56a09c92",
+  "d9b7c649-c975-4f53-88f5-940b29c47247",
+  "dd60633f-2c72-42ba-8547-6f2c8cb0fdb0",
+  "3ce045a0-877b-42aa-8d2c-b4a863336ab8",
+  "e0df059f-28a6-4169-924f-b9623e7184cc",
+  "fe41f596-a71b-4c2f-9b2f-9dcd40b568c3",
+  "08c73485-7c6d-4681-999d-919f5c32dcfa",
+  "9b7bc335-06b5-4cd3-9119-1a649c478509",
+  "8d9fd4e2-6fdb-46b0-b9b9-02f06495c62f",
+  "9195653c-f4aa-453d-aa95-787f6ccfaae9",
+  "0512bb38-d531-4acf-9e7e-0add90816068",
+  "7aeae0e2-70ee-4705-821d-1bba5d5b2ddd",
+  "9d425400-e9b2-4424-9a4b-d4c7abac4140",
+]
+
+[experiment.options]
+sample_seed = 20260601
+sample_strategy = "domain-stratified-proportional"
+sample_size = 47
+sample_quotas = { chrome = 6, gimp = 4, libreoffice_calc = 6, libreoffice_impress = 7, libreoffice_writer = 3, multi_apps = 14, os = 3, thunderbird = 2, vlc = 2, vs_code = 3 }
+
+[benchmark]
+name = "osworld"
+
+[benchmark.options]
+source_path = "external/osworld/src"
+domain = "all"
+test_all_meta_path = "evaluation_examples/test_all.json"
+provider_name = "docker"
+path_to_vm = "external/osworld/src/docker_vm_data/Ubuntu.qcow2"
+headless = true
+action_space = "pyautogui"
+observation_type = "screenshot"
+screen_width = 1920
+screen_height = 1080
+sleep_after_execution = 3.0
+max_steps = 15
+os_type = "Ubuntu"
+
+[agent]
+name = "vllm-agent"
+
+[agent.options]
+max_steps = 15
+max_actions_per_step = 1
+send_screenshot = true
+trajectory_prefix_chars = 12000
+trajectory_observation_chars = 1200
+
+[model]
+name = "Qwen3.5-9B"
+provider = "vllm"
+
+[model.options]
+base_url = "http://127.0.0.1:8002/v1"
+temperature = 0
+top_p = 0.9
+max_tokens = 1024
+request_retries = 2
+retry_backoff_seconds = 10
+timeout = 600

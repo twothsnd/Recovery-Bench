@@ -1,0 +1,32 @@
+[experiment]
+output_dir = "runs/enterpriseops-gym-claude-opus"
+k_values = [1, 2, 3]
+task_ids = []
+
+[benchmark]
+name = "enterpriseops-gym"
+
+[benchmark.options]
+source_path = "external/enterpriseops-gym/src"
+hf_dataset = "ServiceNow-AI/EnterpriseOps-Gym"
+domain = "teams"
+mode = "oracle"
+configs_folder = "external/enterpriseops-gym/tasks/oracle/teams"
+auto_unzip_dbs = true
+
+# Optional when local ports differ from EnterpriseOps-Gym's defaults.
+# [benchmark.options.mcp_server_url_overrides]
+# csm = "http://localhost:8011"
+
+[agent]
+name = "anthropic-agent"
+
+[agent.options]
+max_steps = 50
+
+[model]
+name = "claude-opus-4-1-20250805"
+provider = "anthropic"
+
+[model.options]
+max_tokens = 4096

@@ -1,0 +1,30 @@
+[experiment]
+output_dir = "runs/appworld-gpt-4.1"
+k_values = [1, 2, 3]
+task_ids = []
+
+[benchmark]
+name = "appworld"
+
+[benchmark.options]
+# Runtime copy materialized from the official source checkout. Keep
+# external/appworld/src as the untouched official archive extraction.
+source_path = "external/appworld/runtime"
+
+# Optional AppWorld data root. Leave unset to use the package default.
+# data_root = "external/appworld/data"
+dataset_name = "test_challenge"
+experiment_name = "recovery-bench"
+
+[agent]
+name = "openai-agent"
+
+[agent.options]
+max_steps = 50
+
+[model]
+name = "gpt-4.1"
+provider = "openai"
+
+[model.options]
+temperature = 0

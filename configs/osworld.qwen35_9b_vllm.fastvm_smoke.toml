@@ -1,0 +1,52 @@
+[experiment]
+output_dir = "runs/osworld-qwen35-9b-vllm-fastvm-smoke"
+k_values = [1, 2]
+task_ids = [
+  "2ae9ba84-3a0d-4d4c-8338-3a1478dc5fe3",
+]
+
+[experiment.options]
+sample_seed = 20260602
+sample_strategy = "manual-fastvm-smoke"
+sample_size = 1
+
+[benchmark]
+name = "osworld"
+
+[benchmark.options]
+source_path = "external/osworld/src"
+domain = "all"
+test_all_meta_path = "evaluation_examples/test_all.json"
+provider_name = "fastvm"
+headless = true
+action_space = "pyautogui"
+observation_type = "screenshot"
+screen_width = 1920
+screen_height = 1080
+sleep_after_execution = 3.0
+max_steps = 15
+os_type = "Ubuntu"
+osworld_restore_strategy = "checkpoint"
+
+[agent]
+name = "vllm-agent"
+
+[agent.options]
+max_steps = 15
+max_actions_per_step = 1
+send_screenshot = true
+trajectory_prefix_chars = 12000
+trajectory_observation_chars = 1200
+
+[model]
+name = "Qwen3.5-9B"
+provider = "vllm"
+
+[model.options]
+base_url = "http://127.0.0.1:8002/v1"
+temperature = 0
+top_p = 0.9
+max_tokens = 1024
+request_retries = 2
+retry_backoff_seconds = 10
+timeout = 600

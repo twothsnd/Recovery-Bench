@@ -1,0 +1,27 @@
+[experiment]
+output_dir = "runs/tau-bench-claude-opus"
+k_values = [1, 2, 3]
+task_ids = []
+
+[benchmark]
+name = "tau-bench"
+
+[benchmark.options]
+source_path = "external/tau-bench/src"
+domain = "airline"
+solo_mode = false
+restore_mode = "live"
+user_llm = "anthropic/claude-sonnet-4-5"
+
+[agent]
+name = "anthropic-agent"
+
+[agent.options]
+max_steps = 200
+
+[model]
+name = "claude-opus-4-1-20250805"
+provider = "anthropic"
+
+[model.options]
+max_tokens = 4096
