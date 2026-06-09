@@ -2,9 +2,9 @@
 
 这份文档说明怎么把一个新的 benchmark 或 agent 接入 Recovery-Bench。核心原则是：
 
-> Core 只执行 recovery 协议；benchmark 和 agent 的具体运行逻辑全部放在 adapter 里。
+> Core 负责 recovery 协议调度；benchmark 和 agent 的具体运行逻辑全部放在 adapter 里。
 
-不要为了接入新 benchmark 去改 `ProtocolRunner`。如果必须改 core，通常说明 adapter 边界没有切清楚。
+接入新 benchmark 时，优先把变化收敛在 adapter 层。需要改 `ProtocolRunner` 的情况，先重新检查 adapter 边界是否已经切清楚。
 
 ## 1. 责任边界
 
@@ -25,13 +25,13 @@ Benchmark adapter 负责：
 - 捕获失败 attempt 后的真实状态；
 - 从 snapshot/checkpoint/live handle 恢复环境；
 - 调用官方 evaluator/scorer；
-- 隔离 evaluator 副作用，或明确声明不能 strict recovery；
+- 隔离 evaluator 副作用，并在 capability 里声明 strict recovery 支持情况；
 - 暴露 benchmark 原生 action environment 给 agent。
 
 Agent adapter 负责：
 
 - 调用官方 agent 或自定义 agent；
-- 在 retry attempt 中不读取前几次失败轨迹；
+- 在 retry attempt 中使用全新 agent session 和空 previous attempts；
 - 在 recovery attempt 中保留并使用完整 previous attempts；
 - 把动作真正执行到 benchmark environment；
 - 返回可审计的 action/observation 轨迹。
@@ -60,8 +60,8 @@ class BenchmarkAdapter(Protocol):
 - `snapshot()` 必须捕获 recovery 所需的真实环境状态。
 - `restore(snapshot)` 必须让下一次 recovery attempt 看到同一个失败状态。
 - `evaluate(task)` 必须使用官方 evaluator/scorer。
-- 如果 evaluator 会改环境，adapter 必须在副本/分支上评分，不能污染 recovery state。
-- 如果做不到严格状态一致性，`capabilities().strict_recovery` 必须是 `False`。
+- 如果 evaluator 会改环境，adapter 必须在副本/分支上评分，让评分副作用留在隔离环境里。
+- `capabilities().strict_recovery` 应反映真实状态能力：精确 snapshot/restore 标为 `True`，近似恢复或 live-handle-only 标为 `False`。
 
 ## 3. AgentAdapter 接口
 
@@ -85,10 +85,10 @@ class AgentAdapter(Protocol):
 - `context.protocol`: `success` / `retry` / `recovery`
 - `context.attempt_index`: 当前是第几次 attempt
 - `context.k`: 当前协议允许的最大 attempts
-- `context.previous_attempts`: recovery 时可见的完整失败轨迹；retry 时必须为空
+- `context.previous_attempts`: recovery 时可见的完整失败轨迹；retry 时传入空 tuple
 - `context.state_before`: 当前 attempt 开始前的 snapshot
 
-agent 可以是官方 agent、实验室自己的 agent、或者一个 wrapper。Recovery-Bench 不要求 agent 使用统一模型调用方式。
+agent 可以是官方 agent、实验室自己的 agent、或者一个 wrapper。模型调用、工具调用和动作循环由 agent adapter 自己决定。
 
 ## 4. ProviderAgent Bridge
 
@@ -114,7 +114,7 @@ def run_recovery_bench_agent(
 - 控制每个 attempt 的 step budget；
 - 返回 `AgentRunResult`。
 
-core 不解析 action，不猜 benchmark 的 action space。
+action parsing 和 action-space handling 由 bridge/adapter 负责。
 
 ## 5. Capability 声明
 
@@ -153,11 +153,11 @@ def capabilities(self) -> AgentCapabilities:
     )
 ```
 
-`strict_recovery=True` 只能在恢复状态一致性可信时使用。比如一个只保存 live handle、不能复原到精确失败状态的 adapter，即使能继续运行，也不能标成 strict recovery。
+`strict_recovery=True` 表示 adapter 可以把失败 attempt 的终止状态精确 materialize，并让后续 recovery attempt 从同一状态继续。live-handle continuation、近似 replay、或缺少可验证 restore 机制的实现，应声明 `strict_recovery=False`。
 
 ## 6. import_path 接入
 
-外部成员不需要把 adapter 注册进主仓库。配置里写 import path 即可：
+外部成员通过配置里的 import path 接入 adapter：
 
 ```toml
 [benchmark]
@@ -183,9 +183,9 @@ def build_agent(model_config: ModelConfig, agent_config: AgentConfig) -> AgentAd
 
 ## 7. 组员自己的 benchmark 项目怎么组织
 
-Recovery-Bench core 不规定具体 benchmark 的数据、源码、运行状态和结果目录必须放在哪里。更推荐的方式是：
+具体 benchmark 的数据、源码、运行状态和结果目录由 benchmark 子项目自己决定。推荐组织方式是：
 
-> 每个组员把自己要接的 benchmark 做成一个自包含子项目，只通过 `import_path` 调用 Recovery-Bench 框架。
+> 每个组员把自己要接的 benchmark 做成一个自包含子项目，并通过 `import_path` 调用 Recovery-Bench 框架。
 
 这个子项目可以放在 Recovery-Bench 目录外，也可以作为本地子文件夹放在同一 workspace 里。它应该自己管理：
 
@@ -221,7 +221,7 @@ mybench_recovery/
 
 - `mybench_adapter/` 是 Python package，提供 `BenchmarkAdapter` 和 `AgentAdapter` factory；
 - `configs/mybench.local.toml` 写清楚 adapter import path、数据路径、源码路径、state 路径和输出路径；
-- `external/`、`data/`、`state/`、`runs/` 的名字只是该子项目自己的约定，不是 Recovery-Bench core 的硬性要求；
+- `external/`、`data/`、`state/`、`runs/` 是该子项目自己的目录约定，路径语义由 config 和 adapter 定义；
 - 子项目自己的 `README.md` 应该说明数据怎么下载、官方源码怎么准备、需要哪些环境变量、如何运行 smoke test。
 
 示例 config：
@@ -260,26 +260,26 @@ python -m recovery_bench.cli suite \
 
 注意路径语义：
 
-- Recovery-Bench 不会从目录名推断 `data`、`external` 或 `runs` 的含义；
-- config 里的相对路径按运行命令的当前工作目录解析，不是按 config 文件所在目录解析；
+- `data`、`external` 或 `runs` 的含义来自 config 和 adapter，目录名仅作示例；
+- config 里的相对路径按运行命令的当前工作目录解析；
 - 为了让组员之间复现实验，正式 config 推荐使用绝对路径，或者在子项目 README 里明确要求从哪个目录运行；
 - `experiment.output_dir` 是 Recovery-Bench 写 artifact、manifest、summary、CSV/Markdown report 的位置；
 - `benchmark.options.*` 会原样传给 benchmark adapter，由 adapter 自己解释。
 
-这样每个 benchmark 的复杂性都留在自己的子项目里，Recovery-Bench 主仓库只保留协议、接口、runner 和 report 逻辑。
+这样每个 benchmark 的复杂性都留在自己的子项目里，Recovery-Bench 主仓库保留协议、接口、runner 和 report 逻辑。
 
 ## 8. 最小可运行模板
 
-仓库里有一个完整外部 adapter 示例：
+仓库里有一个完整 example benchmark：
 
-- [examples/adapters/minimal_recovery_adapter.py](../examples/adapters/minimal_recovery_adapter.py)
-- [configs/external_minimal_adapter.example.toml](../configs/external_minimal_adapter.example.toml)
+- [example_benchmark/adapter.py](../example_benchmark/adapter.py)
+- [configs/example_benchmark.example.toml](../configs/example_benchmark.example.toml)
 
-它不改 core registry，只通过 `import_path` 接入。运行：
+它通过 `import_path` 接入 core registry。运行：
 
 ```bash
 PYTHONPATH=.:src .venv/bin/python -m recovery_bench.cli suite \
-  --config configs/external_minimal_adapter.example.toml
+  --config configs/example_benchmark.example.toml
 ```
 
 预期现象：
@@ -294,10 +294,10 @@ PYTHONPATH=.:src .venv/bin/python -m recovery_bench.cli suite \
 
 ```bash
 PYTHONPATH=.:src .venv/bin/python -m recovery_bench.cli check-benchmark \
-  --config configs/external_minimal_adapter.example.toml
+  --config configs/example_benchmark.example.toml
 ```
 
-也可以不写完整 experiment config：
+也可以直接在命令行传入必要参数：
 
 ```bash
 PYTHONPATH=.:src .venv/bin/python -m recovery_bench.cli check-benchmark \
@@ -316,7 +316,7 @@ PYTHONPATH=.:src .venv/bin/python -m recovery_bench.cli check-benchmark \
 - `evaluate`
 - `capabilities`
 
-注意：这是基础检查，不等于严格状态一致性证明。每个真实 benchmark 还应该写自己的 sentinel 测试，例如：
+注意：这是基础 lifecycle 检查。严格状态一致性需要每个真实 benchmark 增加自己的 sentinel 测试，例如：
 
 - 在 attempt 1 写入数据库/file/VM；
 - snapshot；
@@ -329,24 +329,24 @@ PYTHONPATH=.:src .venv/bin/python -m recovery_bench.cli check-benchmark \
 
 接一个新 benchmark 前，逐项确认：
 
-- 是否能不改官方任务定义、action space、evaluator、默认配置；
-- 是否能在每次 attempt 后先调用官方 evaluator；
-- 是否能在 evaluator 之前保存 uncontaminated failure state，或者隔离 evaluator 副作用；
-- 是否能实现 `reset` 到 clean root；
-- 是否能实现 `snapshot/restore` 到失败状态；
-- recovery 是否能保留完整 previous attempts；
-- retry 是否能清空 previous attempts 和 agent memory；
-- 每次 attempt 是否拿到完整官方 budget；
-- artifact 是否记录足够的 action/observation/debug 信息；
-- `capabilities().strict_recovery` 是否和真实工程能力一致。
+- 官方任务定义、action space、evaluator、默认配置保持原样；
+- 每次 attempt 后先调用官方 evaluator；
+- evaluator 之前保存 uncontaminated failure state，或者隔离 evaluator 副作用；
+- `reset` 回到 clean root；
+- `snapshot/restore` 回到失败状态；
+- recovery 保留完整 previous attempts；
+- retry 清空 previous attempts 和 agent memory；
+- 每次 attempt 拿到完整官方 budget；
+- artifact 记录足够的 action/observation/debug 信息；
+- `capabilities().strict_recovery` 和真实工程能力一致。
 
 ## 11. 复杂 harness 怎么接
 
-带有独立 harness、容器、官方 agent loop 或 evaluator runner 的 benchmark，不应该把 harness 逻辑塞进 core。推荐拆法：
+带有独立 harness、容器、官方 agent loop 或 evaluator runner 的 benchmark，推荐把 harness 逻辑放在 adapter 或 benchmark 子项目里。推荐拆法：
 
 - `MyBenchmarkAdapter`：负责任务列表、容器/文件系统/数据库/VM 初始状态、checkpoint 或状态管理、官方 test/evaluator；
 - `MyAgentAdapter`：负责调用官方 agent loop 或实验室自己的 agent loop；
 - adapter 之间通过 `agent_environment()` 传递 official harness session 或 task runtime；
-- Recovery-Bench core 只负责决定什么时候 clean rerun、什么时候从 failed runtime state 继续。
+- Recovery-Bench core 负责决定什么时候 clean rerun、什么时候从 failed runtime state 继续。
 
-如果官方 harness 本身没有 strict checkpoint，需要 adapter 明确声明 `strict_recovery=False`，或者实现可验证的容器/filesystem/database/VM snapshot。
+官方 harness 缺少 strict checkpoint 时，adapter 在 capability 里声明 `strict_recovery=False`；具备可验证的容器/filesystem/database/VM snapshot 后，再声明 strict recovery 支持。

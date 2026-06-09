@@ -21,7 +21,7 @@ from recovery_bench.types import (
 
 
 @dataclass(slots=True)
-class MinimalRecoveryBenchmark:
+class ExampleBenchmark:
     """Small external benchmark example loaded through benchmark.import_path.
 
     The task succeeds only after the state records both "prepare" and
@@ -29,8 +29,8 @@ class MinimalRecoveryBenchmark:
     dirty state from attempt 1, so Recovery@2 succeeds.
     """
 
-    task_ids: tuple[str, ...] = ("minimal-recovery-1",)
-    name: str = "external-minimal"
+    task_ids: tuple[str, ...] = ("example-task-1",)
+    name: str = "example_benchmark"
     state: dict[str, Any] = field(default_factory=dict)
 
     def list_tasks(self) -> list[str]:
@@ -42,7 +42,7 @@ class MinimalRecoveryBenchmark:
         return Task(
             task_id=task_id,
             prompt="Prepare the workspace, then finish the task.",
-            metadata={"source": "examples.adapters.minimal_recovery_adapter"},
+            metadata={"source": "example_benchmark.adapter"},
         )
 
     def reset(self, task: Task) -> StateSnapshot:
@@ -82,17 +82,17 @@ class MinimalRecoveryBenchmark:
             restore_strategy="deepcopy",
             evaluator_isolation="read_only",
             budget_reset="per_attempt_full",
-            official_invariance="external-example",
+            official_invariance="example-benchmark",
             official_harness="none",
             strict_recovery=True,
         )
 
 
 @dataclass(slots=True)
-class MinimalRecoveryAgent:
+class ExampleAgent:
     """Small external agent example loaded through agent.import_path."""
 
-    name: str = "external-minimal-agent"
+    name: str = "example_agent"
 
     def run(
         self,
@@ -122,21 +122,21 @@ class MinimalRecoveryAgent:
             retry_memory_reset="previous_attempts_empty",
             recovery_memory="previous_attempts_forwarded",
             trajectory_export="action_records",
-            official_agent="external-example",
+            official_agent="example-agent",
         )
 
 
 def build_benchmark(
     config: BenchmarkConfig | None = None,
     task_ids: tuple[str, ...] = (),
-) -> MinimalRecoveryBenchmark:
-    selected = task_ids or ("minimal-recovery-1",)
-    return MinimalRecoveryBenchmark(task_ids=selected, name=(config.name if config else "external-minimal"))
+) -> ExampleBenchmark:
+    selected = task_ids or ("example-task-1",)
+    return ExampleBenchmark(task_ids=selected, name=(config.name if config else "example_benchmark"))
 
 
 def build_agent(
     model_config: ModelConfig | None = None,
     agent_config: AgentConfig | None = None,
-) -> MinimalRecoveryAgent:
+) -> ExampleAgent:
     del model_config
-    return MinimalRecoveryAgent(name=(agent_config.name if agent_config else "external-minimal-agent"))
+    return ExampleAgent(name=(agent_config.name if agent_config else "example_agent"))

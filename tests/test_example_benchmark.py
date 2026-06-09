@@ -7,8 +7,8 @@ from recovery_bench.protocol import ProtocolRunner
 from recovery_bench.registry import default_benchmark_registry
 
 
-def test_external_minimal_adapter_runs_without_core_registry_changes() -> None:
-    spec = load_experiment_spec(Path("configs/external_minimal_adapter.example.toml"))
+def test_example_benchmark_runs_without_core_registry_changes() -> None:
+    spec = load_experiment_spec(Path("configs/example_benchmark.example.toml"))
     config = spec.to_config()
     benchmark = default_benchmark_registry().build(spec.benchmark_name, config.benchmark, spec.task_ids)
     agent = default_agent_registry().build(spec.agent_name, config.model, config.agent)

@@ -1,0 +1,16 @@
+[experiment]
+output_dir = "runs/example_benchmark"
+k_values = [1, 2, 3]
+task_ids = ["example-task-1"]
+
+[benchmark]
+name = "example_benchmark"
+import_path = "example_benchmark.adapter:build_benchmark"
+
+[agent]
+name = "example_agent"
+import_path = "example_benchmark.adapter:build_agent"
+
+[model]
+name = "none"
+provider = "local"

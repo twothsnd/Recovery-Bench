@@ -101,7 +101,7 @@ This repository contains the Recovery-Bench framework core:
 - `src/recovery_bench/reporting.py`: writes artifacts, manifests, summaries, and CSV/Markdown reports.
 - `src/recovery_bench/conformance.py`: provides basic adapter lifecycle checks.
 - `src/recovery_bench/adapters/smoke.py`: provides a smoke benchmark for validating protocol semantics.
-- `examples/adapters/minimal_recovery_adapter.py`: shows a minimal external adapter.
+- `example_benchmark/adapter.py`: shows a minimal external benchmark and agent adapter.
 - `tests/`: covers the framework behavior.
 
 Concrete benchmark source code, datasets, runtime environments, model weights, and experimental outputs should live in their own adapter or experiment repositories. To connect a new benchmark, implement an adapter in a separate package, branch, or local directory, then load it through `import_path`.
@@ -142,25 +142,25 @@ The configured `output_dir` receives:
 - `manifest.json`
 - `artifacts/*.json`
 
-## External Adapter Example
+## Example Benchmark
 
-The repository includes a minimal external adapter example:
+The repository includes a minimal example benchmark:
 
-- [examples/adapters/minimal_recovery_adapter.py](examples/adapters/minimal_recovery_adapter.py)
-- [configs/external_minimal_adapter.example.toml](configs/external_minimal_adapter.example.toml)
+- [example_benchmark/adapter.py](example_benchmark/adapter.py)
+- [configs/example_benchmark.example.toml](configs/example_benchmark.example.toml)
 
 Run the basic contract check:
 
 ```bash
 PYTHONPATH=.:src python -m recovery_bench.cli check-benchmark \
-  --config configs/external_minimal_adapter.example.toml
+  --config configs/example_benchmark.example.toml
 ```
 
 Run the full suite:
 
 ```bash
 PYTHONPATH=.:src python -m recovery_bench.cli suite \
-  --config configs/external_minimal_adapter.example.toml
+  --config configs/example_benchmark.example.toml
 ```
 
 ## Adapter Interfaces

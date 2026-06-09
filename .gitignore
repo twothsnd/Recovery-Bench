@@ -27,6 +27,7 @@ logs/
 state/
 backup/
 cache/
+AppWorld-Recovery/
 .cache/
 .codex/
 .agents/
