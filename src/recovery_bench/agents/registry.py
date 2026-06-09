@@ -6,7 +6,6 @@ from typing import Callable
 from ..config import AgentConfig, ModelConfig
 from ..plugins import build_agent_from_import_path
 from ..types import AgentAdapter
-from .provider import build_provider_agent, provider_agent_status
 from .smoke import ProgressSmokeAgent
 
 AgentBuilder = Callable[[ModelConfig, AgentConfig], AgentAdapter]
@@ -92,50 +91,6 @@ class AgentRegistry:
 def default_agent_registry() -> AgentRegistry:
     registry = AgentRegistry()
     registry.register("progress-smoke-agent", lambda _model, _agent: ProgressSmokeAgent())
-    registry.register(
-        "openai-agent",
-        lambda model, agent: build_provider_agent(
-            name="openai-agent",
-            expected_provider="openai",
-            model_config=model,
-            agent_options=agent.options,
-        ),
-        probe=lambda: provider_agent_status("openai"),
-        reason="Requires the openai Python package and OPENAI_API_KEY.",
-    )
-    registry.register(
-        "anthropic-agent",
-        lambda model, agent: build_provider_agent(
-            name="anthropic-agent",
-            expected_provider="anthropic",
-            model_config=model,
-            agent_options=agent.options,
-        ),
-        probe=lambda: provider_agent_status("anthropic"),
-        reason="Requires the anthropic Python package and ANTHROPIC_API_KEY.",
-    )
-    registry.register(
-        "gemini-agent",
-        lambda model, agent: build_provider_agent(
-            name="gemini-agent",
-            expected_provider="gemini",
-            model_config=model,
-            agent_options=agent.options,
-        ),
-        probe=lambda: provider_agent_status("gemini"),
-        reason="Requires the google-genai Python package and GEMINI_API_KEY or GOOGLE_API_KEY.",
-    )
-    registry.register(
-        "vllm-agent",
-        lambda model, agent: build_provider_agent(
-            name="vllm-agent",
-            expected_provider="vllm",
-            model_config=model,
-            agent_options=agent.options,
-        ),
-        probe=lambda: provider_agent_status("vllm"),
-        reason="Requires httpx and a running OpenAI-compatible vLLM server.",
-    )
     return registry
 
 

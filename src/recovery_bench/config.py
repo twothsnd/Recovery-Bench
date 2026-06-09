@@ -19,7 +19,7 @@ class BenchmarkConfig:
 
 @dataclass(frozen=True, slots=True)
 class ModelConfig:
-    """Model provider configuration."""
+    """Opaque model metadata forwarded to agent adapters."""
 
     name: str
     provider: str

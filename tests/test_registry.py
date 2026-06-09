@@ -2,7 +2,7 @@ import sys
 import types
 from pathlib import Path
 
-from recovery_bench.agents.registry import AgentRegistry
+from recovery_bench.agents.registry import AgentRegistry, default_agent_registry
 from recovery_bench.config import AgentConfig, BenchmarkConfig, ModelConfig
 from recovery_bench.registry import BenchmarkRegistry, default_benchmark_registry
 
@@ -83,6 +83,11 @@ def test_agent_registry_can_build_external_import_path(monkeypatch) -> None:
     assert adapter.name == "external-agent"
     assert captured["model_config"] == model_config
     assert captured["agent_config"] == agent_config
+
+
+def test_default_agent_registry_only_contains_smoke_agent() -> None:
+    rows = {name: status for name, status, _reason in default_agent_registry().describe()}
+    assert rows == {"progress-smoke-agent": "available"}
 
 
 def test_real_benchmark_names_are_registered_with_dependency_status() -> None:

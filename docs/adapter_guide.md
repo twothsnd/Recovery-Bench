@@ -88,35 +88,9 @@ class AgentAdapter(Protocol):
 - `context.previous_attempts`: recovery 时可见的完整失败轨迹；retry 时传入空 tuple
 - `context.state_before`: 当前 attempt 开始前的 snapshot
 
-agent 可以是官方 agent、实验室自己的 agent、或者一个 wrapper。模型调用、工具调用和动作循环由 agent adapter 自己决定。
+agent 可以是官方 agent、实验室自己的 agent、或者一个 wrapper。模型 API、工具调用和动作循环由 agent adapter 自己决定。Recovery-Bench core 不内置模型 provider client。
 
-## 4. ProviderAgent Bridge
-
-如果使用内置 `openai-agent` / `anthropic-agent` / `vllm-agent` 这类 provider-backed agent，benchmark 的 `agent_environment()` 应该暴露一个 bridge 方法：
-
-```python
-def run_recovery_bench_agent(
-    *,
-    task: Task,
-    prompt: str,
-    model_client: ModelClient,
-    context: AgentContext,
-    options: dict,
-) -> AgentRunResult:
-    ...
-```
-
-这个 bridge 负责 benchmark-specific 的事情：
-
-- 把模型输出解析成官方 action；
-- 调用官方 step/tool/command API；
-- 收集 observation；
-- 控制每个 attempt 的 step budget；
-- 返回 `AgentRunResult`。
-
-action parsing 和 action-space handling 由 bridge/adapter 负责。
-
-## 5. Capability 声明
+## 4. Capability 声明
 
 每个正式 adapter 都应该实现 `capabilities()`。这是 manifest 里判断结果可信度的依据。
 
@@ -129,7 +103,7 @@ def capabilities(self) -> BenchmarkCapabilities:
     return BenchmarkCapabilities(
         state_materialization="official_checkpoint",
         state_snapshot="strict",
-        restore_strategy="provider-checkpoint",
+        restore_strategy="official-checkpoint",
         evaluator_isolation="pre_evaluate_checkpoint",
         budget_reset="per_attempt_full",
         official_invariance="official_harness",
@@ -155,9 +129,9 @@ def capabilities(self) -> AgentCapabilities:
 
 `strict_recovery=True` 表示 adapter 可以把失败 attempt 的终止状态精确 materialize，并让后续 recovery attempt 从同一状态继续。live-handle continuation、近似 replay、或缺少可验证 restore 机制的实现，应声明 `strict_recovery=False`。
 
-## 6. import_path 接入
+## 5. import_path 接入
 
-外部成员通过配置里的 import path 接入 adapter：
+外部成员通过配置里的 import path 接入 benchmark 和 agent adapter：
 
 ```toml
 [benchmark]
@@ -181,7 +155,9 @@ def build_agent(model_config: ModelConfig, agent_config: AgentConfig) -> AgentAd
 
 `import_path` 同时支持 `module:attribute` 和 `module.attribute`。
 
-## 7. 组员自己的 benchmark 项目怎么组织
+`ModelConfig` 会原样传给 agent factory。core 不解释 `model.provider`，也不根据它创建模型 client；子项目的 agent adapter 自己决定如何使用模型名、API key、base URL、本地服务或官方 agent 参数。
+
+## 6. 组员自己的 benchmark 项目怎么组织
 
 具体 benchmark 的数据、源码、运行状态和结果目录由 benchmark 子项目自己决定。推荐组织方式是：
 
@@ -268,7 +244,7 @@ python -m recovery_bench.cli suite \
 
 这样每个 benchmark 的复杂性都留在自己的子项目里，Recovery-Bench 主仓库保留协议、接口、runner 和 report 逻辑。
 
-## 8. 最小可运行模板
+## 7. 最小可运行模板
 
 仓库里有一个完整 example benchmark：
 
@@ -288,7 +264,7 @@ PYTHONPATH=.:src .venv/bin/python -m recovery_bench.cli suite \
 - `Retry@2` 失败，因为 retry 回 clean state；
 - `Recovery@2` 成功，因为 recovery 继承 attempt 1 的 `prepare` 状态。
 
-## 9. Conformance 自检
+## 8. Conformance 自检
 
 写完 benchmark adapter 后，先跑基础契约检查：
 
@@ -325,7 +301,7 @@ PYTHONPATH=.:src .venv/bin/python -m recovery_bench.cli check-benchmark \
 - 检查 attempt 2 看到的状态是否和失败状态完全一致；
 - 检查 evaluator 是否污染了 recovery state。
 
-## 10. 接入 checklist
+## 9. 接入 checklist
 
 接一个新 benchmark 前，逐项确认：
 
@@ -340,7 +316,7 @@ PYTHONPATH=.:src .venv/bin/python -m recovery_bench.cli check-benchmark \
 - artifact 记录足够的 action/observation/debug 信息；
 - `capabilities().strict_recovery` 和真实工程能力一致。
 
-## 11. 复杂 harness 怎么接
+## 10. 复杂 harness 怎么接
 
 带有独立 harness、容器、官方 agent loop 或 evaluator runner 的 benchmark，推荐把 harness 逻辑放在 adapter 或 benchmark 子项目里。推荐拆法：
 

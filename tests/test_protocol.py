@@ -2,7 +2,6 @@ from dataclasses import replace
 from pathlib import Path
 
 from recovery_bench.adapters.smoke import build_progress_smoke_benchmark
-from recovery_bench.agents.provider import ProviderAgent
 from recovery_bench.agents.smoke import ProgressSmokeAgent
 from recovery_bench.config import BenchmarkConfig, ExperimentConfig, ModelConfig
 from recovery_bench.experiment import ExperimentSuite, build_manifest
@@ -129,7 +128,7 @@ def test_suite_does_not_rerun_recovery_when_shared_attempt_one_succeeds() -> Non
 
 def test_retry_and_recovery_attempts_get_full_configured_step_budget() -> None:
     benchmark = StepBudgetBenchmark()
-    agent = ProviderAgent(name="step-budget-agent", client=FakeModelClient(), options={"max_steps": 50})
+    agent = StepBudgetAgent(max_steps=50)
     runner = ProtocolRunner(
         benchmark=benchmark,
         agent=agent,
@@ -218,11 +217,6 @@ class FirstCallCompletesThenFailsAgent:
         return AgentRunResult(actions=(ActionRecord(action="prepare-only"),))
 
 
-class FakeModelClient:
-    provider = "fake"
-    model = "fake-model"
-
-
 class StepBudgetBenchmark:
     name = "step-budget"
 
@@ -267,17 +261,36 @@ class StepBudgetEnvironment:
         *,
         task: Task,
         prompt: str,
-        model_client: FakeModelClient,
         context: AgentContext,
-        options: dict[str, object] | None = None,
+        max_steps: int,
         **_: object,
     ) -> AgentRunResult:
-        max_steps = int((options or {})["max_steps"])
         self.benchmark.seen_step_budgets.append((context.protocol, context.attempt_index, max_steps))
         self.benchmark.state.append(f"{context.protocol}-{context.attempt_index}")
         return AgentRunResult(
             actions=(ActionRecord(action={"max_steps": max_steps}),),
             metadata={"max_steps": max_steps},
+        )
+
+
+class StepBudgetAgent:
+    name = "step-budget-agent"
+
+    def __init__(self, *, max_steps: int) -> None:
+        self.max_steps = max_steps
+
+    def run(
+        self,
+        task: Task,
+        prompt: str,
+        environment: StepBudgetEnvironment,
+        context: AgentContext,
+    ) -> AgentRunResult:
+        return environment.run_recovery_bench_agent(
+            task=task,
+            prompt=prompt,
+            context=context,
+            max_steps=self.max_steps,
         )
 
 
