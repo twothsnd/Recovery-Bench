@@ -181,7 +181,94 @@ def build_agent(model_config: ModelConfig, agent_config: AgentConfig) -> AgentAd
 
 `import_path` 同时支持 `module:attribute` 和 `module.attribute`。
 
-## 7. 最小可运行模板
+## 7. 组员自己的 benchmark 项目怎么组织
+
+Recovery-Bench core 不规定具体 benchmark 的数据、源码、运行状态和结果目录必须放在哪里。更推荐的方式是：
+
+> 每个组员把自己要接的 benchmark 做成一个自包含子项目，只通过 `import_path` 调用 Recovery-Bench 框架。
+
+这个子项目可以放在 Recovery-Bench 目录外，也可以作为本地子文件夹放在同一 workspace 里。它应该自己管理：
+
+- adapter 代码；
+- config 模板；
+- 官方 benchmark 源码或 harness；
+- 数据集、任务文件、初始数据库；
+- checkpoint、复制数据库、VM/container state 等运行状态；
+- 实验输出。
+
+一个典型结构是：
+
+```text
+mybench_recovery/
+  README.md
+  configs/
+    mybench.local.toml
+  mybench_adapter/
+    __init__.py
+    benchmark_adapter.py
+    agent_adapter.py
+  external/
+    official_benchmark_source/
+  data/
+    tasks_or_databases/
+  state/
+    checkpoints_or_runtime_state/
+  runs/
+    dev/
+```
+
+其中：
+
+- `mybench_adapter/` 是 Python package，提供 `BenchmarkAdapter` 和 `AgentAdapter` factory；
+- `configs/mybench.local.toml` 写清楚 adapter import path、数据路径、源码路径、state 路径和输出路径；
+- `external/`、`data/`、`state/`、`runs/` 的名字只是该子项目自己的约定，不是 Recovery-Bench core 的硬性要求；
+- 子项目自己的 `README.md` 应该说明数据怎么下载、官方源码怎么准备、需要哪些环境变量、如何运行 smoke test。
+
+示例 config：
+
+```toml
+[experiment]
+output_dir = "/abs/path/to/mybench_recovery/runs/dev"
+k_values = [1, 2, 3]
+task_ids = ["task_001"]
+
+[benchmark]
+name = "mybench"
+import_path = "mybench_adapter.benchmark_adapter:build_benchmark"
+
+[benchmark.options]
+dataset_path = "/abs/path/to/mybench_recovery/data"
+source_path = "/abs/path/to/mybench_recovery/external/official_benchmark_source"
+state_dir = "/abs/path/to/mybench_recovery/state"
+
+[agent]
+name = "my-agent"
+import_path = "mybench_adapter.agent_adapter:build_agent"
+
+[model]
+name = "example-model"
+provider = "local"
+```
+
+运行时把 Recovery-Bench core 和 benchmark 子项目都放进 `PYTHONPATH`：
+
+```bash
+PYTHONPATH=/abs/path/to/Recovery-Bench/src:/abs/path/to/mybench_recovery \
+python -m recovery_bench.cli suite \
+  --config /abs/path/to/mybench_recovery/configs/mybench.local.toml
+```
+
+注意路径语义：
+
+- Recovery-Bench 不会从目录名推断 `data`、`external` 或 `runs` 的含义；
+- config 里的相对路径按运行命令的当前工作目录解析，不是按 config 文件所在目录解析；
+- 为了让组员之间复现实验，正式 config 推荐使用绝对路径，或者在子项目 README 里明确要求从哪个目录运行；
+- `experiment.output_dir` 是 Recovery-Bench 写 artifact、manifest、summary、CSV/Markdown report 的位置；
+- `benchmark.options.*` 会原样传给 benchmark adapter，由 adapter 自己解释。
+
+这样每个 benchmark 的复杂性都留在自己的子项目里，Recovery-Bench 主仓库只保留协议、接口、runner 和 report 逻辑。
+
+## 8. 最小可运行模板
 
 仓库里有一个完整外部 adapter 示例：
 
@@ -201,7 +288,7 @@ PYTHONPATH=.:src .venv/bin/python -m recovery_bench.cli suite \
 - `Retry@2` 失败，因为 retry 回 clean state；
 - `Recovery@2` 成功，因为 recovery 继承 attempt 1 的 `prepare` 状态。
 
-## 8. Conformance 自检
+## 9. Conformance 自检
 
 写完 benchmark adapter 后，先跑基础契约检查：
 
@@ -238,7 +325,7 @@ PYTHONPATH=.:src .venv/bin/python -m recovery_bench.cli check-benchmark \
 - 检查 attempt 2 看到的状态是否和失败状态完全一致；
 - 检查 evaluator 是否污染了 recovery state。
 
-## 9. 接入 checklist
+## 10. 接入 checklist
 
 接一个新 benchmark 前，逐项确认：
 
@@ -253,7 +340,7 @@ PYTHONPATH=.:src .venv/bin/python -m recovery_bench.cli check-benchmark \
 - artifact 是否记录足够的 action/observation/debug 信息；
 - `capabilities().strict_recovery` 是否和真实工程能力一致。
 
-## 10. 复杂 harness 怎么接
+## 11. 复杂 harness 怎么接
 
 带有独立 harness、容器、官方 agent loop 或 evaluator runner 的 benchmark，不应该把 harness 逻辑塞进 core。推荐拆法：
 
