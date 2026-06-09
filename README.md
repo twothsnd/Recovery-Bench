@@ -1,57 +1,55 @@
 # Recovery-Bench
 
-Recovery-Bench 是一个用于评测 **stateful agent recovery** 的轻量框架。
+Recovery-Bench is a lightweight framework for evaluating **stateful agent recovery**. It wraps existing agent benchmarks into a common multi-attempt protocol, making it possible to compare clean-state retry against recovery from the agent's own failed state.
 
-它不提供某个具体 benchmark 的复刻版，也不把外部 benchmark、数据、Docker/VM 镜像、模型权重或实验结果放进仓库。这个仓库只负责一件事：
+The central boundary is benchmark invariance: the original benchmark defines the task, initial state, action space, default configuration, per-attempt budget, and official evaluator or scorer. Recovery-Bench only organizes execution into `Success@1`, `Retry@k`, and `Recovery@k`.
 
-> 在不改变原始 benchmark 语义的前提下，把单次任务执行组织成 `Success@1`、`Retry@k` 和 `Recovery@k` 三种协议。
+## Core Comparison
 
-## 核心比较
-
-Recovery-Bench 的主比较是：
+Recovery-Bench focuses on the following comparison:
 
 ```text
-Retry@k    : 每次失败后回到 clean initial state，重新做一次官方任务。
-Recovery@k : 每次失败后不 reset，下一次 attempt 继承 agent 自己造成的真实失败状态。
+Retry@k    : after each failed attempt, start a new official run from the clean initial state.
+Recovery@k : after each failed attempt, continue from the failure state caused by the agent.
 ```
 
-两者使用相同的 attempt 数量 `k`，区别只在状态和记忆：
+Both protocols give the agent the same number of attempts `k`. They differ in state and memory:
 
-- `Retry@k` 是 clean-state rerun；环境 reset，agent memory reset。
-- `Recovery@k` 是 stateful continuation；环境继承失败状态，agent 保留完整失败轨迹。
+- `Retry@k` is a clean-state rerun: the environment is reset and agent memory is reset.
+- `Recovery@k` is stateful continuation: the environment carries over the failed state and the agent keeps the full failed trajectory.
 
-框架要回答的问题是：
+The framework asks:
 
-> 同样给 agent 多次机会，它只是会从干净状态重试，还是能从自己造成的失败状态里恢复？
+> Given the same number of attempts, does the agent merely improve when restarted from scratch, or can it recover from the state it created through its own failed actions?
 
-## 协议约束
+## Protocol Requirements
 
-Recovery-Bench 的设计原则是 benchmark invariance：原始 benchmark 该是什么样就是什么样。
+Recovery-Bench follows benchmark invariance: the original benchmark semantics remain authoritative.
 
-必须保持不变：
+The original benchmark continues to define:
 
-- 官方 task definition；
-- 官方 initial state；
-- 官方 action space；
-- 官方 evaluator/scorer；
-- 官方 success/failure criteria；
-- 官方默认参数；
-- 官方单次 attempt budget。
+- official task definition;
+- official initial state;
+- official action space;
+- official evaluator or scorer;
+- official success and failure criteria;
+- official default configuration;
+- official single-attempt budget.
 
-框架只改变多次 attempt 的组织方式，不改任务、不改评分、不改动作空间。
+Recovery-Bench adds a multi-attempt scheduling layer on top of those semantics. That layer decides whether the next attempt starts again from the clean state or continues from the real state left by the previous failed attempt.
 
-每次 attempt 的控制流是：
+Each attempt follows this control flow:
 
 ```text
-1. 从某个状态节点开始执行一次官方 attempt。
-2. attempt 结束后，先调用官方 evaluator/scorer。
-3. 如果成功，当前协议成功结束。
-4. 如果失败：
-   - Retry 分支回到 clean root state；
-   - Recovery 分支从该失败 attempt 留下的真实状态继续。
+1. Start one official attempt from a state node.
+2. At attempt end, score it with the official evaluator or scorer.
+3. If the attempt succeeds, the protocol succeeds.
+4. If the attempt fails:
+   - the retry branch returns to the clean root state;
+   - the recovery branch continues from the failed attempt's resulting state.
 ```
 
-概念图：
+Conceptually:
 
 ```text
 clean state S0
@@ -62,66 +60,59 @@ clean state S0
           └── recovery -> continue from S1, memory preserved
 ```
 
-## 一致性要求
+## State Consistency
 
-Recovery 的对象必须是 agent 自己造成的失败后真实环境状态。
+Recovery must target the real environment state caused by the agent's own failed attempt.
 
-因此 recovery start state 不能是：
+A valid recovery start state should:
 
-- reset 后的 clean state；
-- rollback 后的历史状态；
-- 手动修复过的状态；
-- 近似 replay 出来的状态；
-- 被 evaluator 副作用污染过的状态。
+- materialize the actual terminal state of the previous failed attempt;
+- preserve the real side effects and useful progress produced by that attempt;
+- be restored through a strict checkpoint, snapshot, clone, copy-on-write branch, or equivalent mechanism;
+- keep scoring read-only with respect to that state, or run scoring on an isolated copy;
+- present the next attempt with the same state that existed when the previous failed attempt ended.
 
-如果官方 evaluator/scorer 会改变环境，adapter 必须隔离评分副作用，例如在 clone、checkpoint、copy-on-write 分支或一次性副本上评分。评分结果用于决定是否进入下一次 attempt，但 recovery 分支必须继续使用未被评分污染的失败状态。
+If the official evaluator or scorer mutates the environment, the adapter must isolate those scoring side effects. The score controls protocol flow, but the recovery branch must continue from the uncontaminated failure state.
 
-## Budget 和 Memory
+## Budget And Memory
 
-每一次 attempt 都拿到完整的官方单次 attempt budget。
+Each attempt receives the full official single-attempt budget.
 
-例如官方 benchmark 给单次任务 50 steps，那么：
+For example, if the official benchmark allows 50 steps for one task attempt:
 
-- attempt 1 有 50 steps；
-- retry attempt 2 也有 50 steps；
-- recovery attempt 2 也有 50 steps。
+- attempt 1 receives 50 steps;
+- retry attempt 2 receives 50 steps;
+- recovery attempt 2 receives 50 steps.
 
-前一次 attempt 用掉的 steps、tokens、tool calls 或时间，不会扣到下一次 attempt 上。
+Steps, tokens, tool calls, or wall-clock time consumed by one attempt do not reduce the budget of the next attempt.
 
-Memory 规则：
+Memory rules:
 
-- `Retry@k`：每次都是新的官方运行，agent 不能看到前几次失败轨迹。
-- `Recovery@k`：agent 必须保留完整 previous attempts，包括 observation、action、错误轨迹、中间判断和失败后果。
+- `Retry@k`: every attempt is a fresh official run, with agent memory reinitialized.
+- `Recovery@k`: the agent keeps complete previous attempts, including observations, actions, failed trajectories, intermediate conclusions, and consequences of earlier mistakes.
 
-## 仓库包含什么
+## Repository Layout
 
-- `ProtocolRunner`：执行 `Success@1`、`Retry@k`、`Recovery@k`。
-- `BenchmarkAdapter` / `AgentAdapter`：稳定接入接口。
-- `import_path` plugin loading：外部 adapter 不需要改 core。
-- artifact、manifest、summary、CSV/Markdown report 输出。
-- 基础 conformance check。
-- 一个 smoke benchmark，用于验证协议语义。
-- 一个最小外部 adapter 示例。
-- 单元测试。
+This repository contains the Recovery-Bench framework core:
 
-## 仓库不包含什么
+- `src/recovery_bench/protocol.py`: runs `Success@1`, `Retry@k`, and `Recovery@k`.
+- `src/recovery_bench/types.py`: defines the `BenchmarkAdapter` and `AgentAdapter` interfaces.
+- `src/recovery_bench/plugins.py`: loads external benchmark and agent adapters through `import_path`.
+- `src/recovery_bench/reporting.py`: writes artifacts, manifests, summaries, and CSV/Markdown reports.
+- `src/recovery_bench/conformance.py`: provides basic adapter lifecycle checks.
+- `src/recovery_bench/adapters/smoke.py`: provides a smoke benchmark for validating protocol semantics.
+- `examples/adapters/minimal_recovery_adapter.py`: shows a minimal external adapter.
+- `tests/`: covers the framework behavior.
 
-- 外部 benchmark 源码或数据。
-- 具体外部 benchmark adapter。
-- 本地 conda/venv 环境。
-- Docker、VM、云环境状态。
-- 模型 checkpoint。
-- 真实实验 run outputs。
+Concrete benchmark source code, datasets, runtime environments, model weights, and experimental outputs should live in their own adapter or experiment repositories. To connect a new benchmark, implement an adapter in a separate package, branch, or local directory, then load it through `import_path`.
 
-课题组成员接入自己的 benchmark 时，应在独立包、独立分支或本地目录里实现 adapter，然后通过 `import_path` 加载。
-
-## 安装
+## Installation
 
 ```bash
 python -m pip install -e .
 ```
 
-运行测试：
+Run tests:
 
 ```bash
 python -m pytest
@@ -129,20 +120,20 @@ python -m pytest
 
 ## Smoke Check
 
-内置 smoke benchmark 用来检查 retry 和 recovery 的语义区别：
+The built-in smoke benchmark verifies the semantic difference between retry and recovery:
 
 ```bash
 PYTHONPATH=src python -m recovery_bench.cli suite \
   --config configs/progress_smoke.toml
 ```
 
-预期现象：
+Expected behavior:
 
-- `Success@1` 失败；
-- `Retry@2` 失败，因为 retry 回到 clean state；
-- `Recovery@2` 成功，因为 recovery 继承 attempt 1 留下的进展状态。
+- `Success@1` fails.
+- `Retry@2` fails because retry returns to the clean state.
+- `Recovery@2` succeeds because recovery inherits the progress left by attempt 1.
 
-输出目录由配置里的 `output_dir` 指定，包含：
+The configured `output_dir` receives:
 
 - `main.md`
 - `summary.md`
@@ -151,30 +142,30 @@ PYTHONPATH=src python -m recovery_bench.cli suite \
 - `manifest.json`
 - `artifacts/*.json`
 
-## 外部 Adapter 示例
+## External Adapter Example
 
-仓库提供一个最小外部 adapter 示例：
+The repository includes a minimal external adapter example:
 
 - [examples/adapters/minimal_recovery_adapter.py](examples/adapters/minimal_recovery_adapter.py)
 - [configs/external_minimal_adapter.example.toml](configs/external_minimal_adapter.example.toml)
 
-运行基础契约检查：
+Run the basic contract check:
 
 ```bash
 PYTHONPATH=.:src python -m recovery_bench.cli check-benchmark \
   --config configs/external_minimal_adapter.example.toml
 ```
 
-运行完整 suite：
+Run the full suite:
 
 ```bash
 PYTHONPATH=.:src python -m recovery_bench.cli suite \
   --config configs/external_minimal_adapter.example.toml
 ```
 
-## Adapter 接口
+## Adapter Interfaces
 
-新的 benchmark 实现 `BenchmarkAdapter`：
+New benchmarks implement `BenchmarkAdapter`:
 
 ```python
 class BenchmarkAdapter(Protocol):
@@ -190,7 +181,7 @@ class BenchmarkAdapter(Protocol):
     def export_artifact(self, output_dir: Path, result: BenchmarkResult) -> None: ...
 ```
 
-新的 agent 实现 `AgentAdapter`：
+New agents implement `AgentAdapter`:
 
 ```python
 class AgentAdapter(Protocol):
@@ -205,7 +196,7 @@ class AgentAdapter(Protocol):
     ) -> AgentRunResult: ...
 ```
 
-通过 TOML `import_path` 接入外部实现：
+Use TOML `import_path` fields to connect external implementations:
 
 ```toml
 [benchmark]
@@ -217,7 +208,7 @@ name = "my-agent"
 import_path = "my_package.my_agent_adapter:build_agent"
 ```
 
-推荐 factory 签名：
+Recommended factory signatures:
 
 ```python
 def build_benchmark(config: BenchmarkConfig, task_ids: tuple[str, ...]) -> BenchmarkAdapter:
@@ -227,11 +218,11 @@ def build_agent(model_config: ModelConfig, agent_config: AgentConfig) -> AgentAd
     ...
 ```
 
-更完整的接入说明见 [docs/adapter_guide.md](docs/adapter_guide.md)。
+See [docs/adapter_guide.md](docs/adapter_guide.md) for the full adapter guide.
 
 ## Conformance Check
 
-写完 adapter 后先跑基础契约检查：
+After writing an adapter, run the basic contract check:
 
 ```bash
 PYTHONPATH=.:src python -m recovery_bench.cli check-benchmark \
@@ -240,7 +231,7 @@ PYTHONPATH=.:src python -m recovery_bench.cli check-benchmark \
   --task-id task_001
 ```
 
-这个检查覆盖：
+The check covers:
 
 - `list_tasks`
 - `load_task`
@@ -250,4 +241,4 @@ PYTHONPATH=.:src python -m recovery_bench.cli check-benchmark \
 - `evaluate`
 - `capabilities`
 
-注意：conformance check 只检查基础生命周期，不等于证明 strict recovery 正确。真实 benchmark adapter 还需要自己增加状态一致性测试，确认失败状态、评分隔离、restore 后状态和官方 budget 都符合协议。
+The conformance check only validates the basic lifecycle. Strict recovery also requires benchmark-specific state consistency tests that verify the failure state, scorer isolation, restored state, and official budget behavior.
