@@ -1,262 +1,253 @@
-# Recovery Bench
+# Recovery-Bench
 
-Recovery Bench is a framework for evaluating `Recovery@k`: stateful agent retries where each failed attempt leaves the environment dirty and the next attempt must repair-and-continue from that inherited state.
+Recovery-Bench 是一个用于评测 **stateful agent recovery** 的轻量框架。
 
-The research plan is in [recovery_at_k_plan.md](recovery_at_k_plan.md).
+它不提供某个具体 benchmark 的复刻版，也不把外部 benchmark、数据、Docker/VM 镜像、模型权重或实验结果放进仓库。这个仓库只负责一件事：
 
-## Core Protocols
+> 在不改变原始 benchmark 语义的前提下，把单次任务执行组织成 `Success@1`、`Retry@k` 和 `Recovery@k` 三种协议。
 
-- `Success@1`: one clean attempt.
-- `Retry@k`: failed attempts reset back to clean state before the next attempt.
-- `Recovery@k`: failed attempts do not reset; the next attempt inherits the previous state.
+## 核心比较
 
-The standard suite reports:
+Recovery-Bench 的主比较是：
 
 ```text
-Success@1
-Retry@2
-Recovery@2
-Retry@3
-Recovery@3
-Recovery Gap = Retry@k - Recovery@k
+Retry@k    : 每次失败后回到 clean initial state，重新做一次官方任务。
+Recovery@k : 每次失败后不 reset，下一次 attempt 继承 agent 自己造成的真实失败状态。
+```
+
+两者使用相同的 attempt 数量 `k`，区别只在状态和记忆：
+
+- `Retry@k` 是 clean-state rerun；环境 reset，agent memory reset。
+- `Recovery@k` 是 stateful continuation；环境继承失败状态，agent 保留完整失败轨迹。
+
+框架要回答的问题是：
+
+> 同样给 agent 多次机会，它只是会从干净状态重试，还是能从自己造成的失败状态里恢复？
+
+## 协议约束
+
+Recovery-Bench 的设计原则是 benchmark invariance：原始 benchmark 该是什么样就是什么样。
+
+必须保持不变：
+
+- 官方 task definition；
+- 官方 initial state；
+- 官方 action space；
+- 官方 evaluator/scorer；
+- 官方 success/failure criteria；
+- 官方默认参数；
+- 官方单次 attempt budget。
+
+框架只改变多次 attempt 的组织方式，不改任务、不改评分、不改动作空间。
+
+每次 attempt 的控制流是：
+
+```text
+1. 从某个状态节点开始执行一次官方 attempt。
+2. attempt 结束后，先调用官方 evaluator/scorer。
+3. 如果成功，当前协议成功结束。
+4. 如果失败：
+   - Retry 分支回到 clean root state；
+   - Recovery 分支从该失败 attempt 留下的真实状态继续。
+```
+
+概念图：
+
+```text
+clean state S0
+  attempt 1
+    ├── success -> solved
+    └── failure state S1
+          ├── retry    -> reset to S0, memory reset
+          └── recovery -> continue from S1, memory preserved
+```
+
+## 一致性要求
+
+Recovery 的对象必须是 agent 自己造成的失败后真实环境状态。
+
+因此 recovery start state 不能是：
+
+- reset 后的 clean state；
+- rollback 后的历史状态；
+- 手动修复过的状态；
+- 近似 replay 出来的状态；
+- 被 evaluator 副作用污染过的状态。
+
+如果官方 evaluator/scorer 会改变环境，adapter 必须隔离评分副作用，例如在 clone、checkpoint、copy-on-write 分支或一次性副本上评分。评分结果用于决定是否进入下一次 attempt，但 recovery 分支必须继续使用未被评分污染的失败状态。
+
+## Budget 和 Memory
+
+每一次 attempt 都拿到完整的官方单次 attempt budget。
+
+例如官方 benchmark 给单次任务 50 steps，那么：
+
+- attempt 1 有 50 steps；
+- retry attempt 2 也有 50 steps；
+- recovery attempt 2 也有 50 steps。
+
+前一次 attempt 用掉的 steps、tokens、tool calls 或时间，不会扣到下一次 attempt 上。
+
+Memory 规则：
+
+- `Retry@k`：每次都是新的官方运行，agent 不能看到前几次失败轨迹。
+- `Recovery@k`：agent 必须保留完整 previous attempts，包括 observation、action、错误轨迹、中间判断和失败后果。
+
+## 仓库包含什么
+
+- `ProtocolRunner`：执行 `Success@1`、`Retry@k`、`Recovery@k`。
+- `BenchmarkAdapter` / `AgentAdapter`：稳定接入接口。
+- `import_path` plugin loading：外部 adapter 不需要改 core。
+- artifact、manifest、summary、CSV/Markdown report 输出。
+- 基础 conformance check。
+- 一个 smoke benchmark，用于验证协议语义。
+- 一个最小外部 adapter 示例。
+- 单元测试。
+
+## 仓库不包含什么
+
+- 外部 benchmark 源码或数据。
+- 具体外部 benchmark adapter。
+- 本地 conda/venv 环境。
+- Docker、VM、云环境状态。
+- 模型 checkpoint。
+- 真实实验 run outputs。
+
+课题组成员接入自己的 benchmark 时，应在独立包、独立分支或本地目录里实现 adapter，然后通过 `import_path` 加载。
+
+## 安装
+
+```bash
+python -m pip install -e .
+```
+
+运行测试：
+
+```bash
+python -m pytest
 ```
 
 ## Smoke Check
 
-The built-in smoke benchmark verifies the key semantic distinction: `Recovery@2` succeeds by preserving progress from attempt 1, while `Retry@2` fails because reset discards that progress.
+内置 smoke benchmark 用来检查 retry 和 recovery 的语义区别：
 
 ```bash
-PYTHONPATH=src python3 -m recovery_bench.cli suite --config configs/progress_smoke.toml
+PYTHONPATH=src python -m recovery_bench.cli suite \
+  --config configs/progress_smoke.toml
 ```
 
-Outputs:
+预期现象：
 
-- `runs/progress-smoke/main.md`: main comparison table.
-- `runs/progress-smoke/summary.md`: protocol/k aggregate table.
-- `runs/progress-smoke/main.csv` and `summary.csv`: machine-readable tables.
-- `runs/progress-smoke/manifest.json`: run metadata and per-task outcomes.
-- `runs/progress-smoke/artifacts/`: per-task JSON artifacts.
+- `Success@1` 失败；
+- `Retry@2` 失败，因为 retry 回到 clean state；
+- `Recovery@2` 成功，因为 recovery 继承 attempt 1 留下的进展状态。
 
-You can still override config values from the CLI:
+输出目录由配置里的 `output_dir` 指定，包含：
 
-```bash
-PYTHONPATH=src python3 -m recovery_bench.cli suite \
-  --config configs/progress_smoke.toml \
-  --output-dir runs/progress-smoke-override \
-  --k 1 --k 2 --k 3
-```
+- `main.md`
+- `summary.md`
+- `main.csv`
+- `summary.csv`
+- `manifest.json`
+- `artifacts/*.json`
 
-## External Benchmarks
+## 外部 Adapter 示例
 
-Do not use `git pull` for benchmark source fetching in this project. Prefer downloading versioned archive files with `wget`, then unpacking them under `external/`.
+仓库提供一个最小外部 adapter 示例：
 
-```bash
-scripts/download_benchmark_archive.sh NAME URL
-```
+- [examples/adapters/minimal_recovery_adapter.py](examples/adapters/minimal_recovery_adapter.py)
+- [configs/external_minimal_adapter.example.toml](configs/external_minimal_adapter.example.toml)
 
-For the first-wave source checkouts:
+运行基础契约检查：
 
 ```bash
-scripts/download_first_benchmarks.sh
-```
-
-The downloader uses official sources only. For GitHub archive URLs it first
-tries the normal `github.com/.../archive/...` URL, then the official
-`codeload.github.com` URL. If local DNS routes GitHub to a TLS-resetting
-endpoint, it retries official codeload IPs with `Host: codeload.github.com`.
-Override that last fallback with:
-
-```bash
-GITHUB_CODELOAD_IPS="140.82.112.10 140.82.113.10" scripts/download_first_benchmarks.sh
-```
-
-After the official source archives are downloaded, install runtime dependencies
-from the local source checkouts:
-
-```bash
-scripts/install_benchmark_deps.sh
-```
-
-Useful overrides:
-
-```bash
-PYTHON=python3.13 INSTALL_APPWORLD=0 scripts/install_benchmark_deps.sh
-PIP_EXTRA_ARGS="--upgrade" scripts/install_benchmark_deps.sh
-```
-
-AppWorld also needs its official data bundle:
-
-```bash
-PYTHON=.venv/bin/python scripts/download_appworld_data.sh
-```
-
-If a single S3 connection is slow, use parallel byte-range downloads:
-
-```bash
-APPWORLD_DOWNLOAD_MODE=parallel APPWORLD_DOWNLOAD_JOBS=16 PYTHON=.venv/bin/python scripts/download_appworld_data.sh
-```
-
-If DNS picks a slow S3 endpoint, pin an official S3 IP while preserving the
-official host header:
-
-```bash
-APPWORLD_S3_IP=52.92.180.57 PYTHON=.venv/bin/python scripts/download_appworld_data.sh
-```
-
-If this environment throttles `wget` on S3, the same script can still use the
-official S3 URL with resumable `curl`:
-
-```bash
-APPWORLD_DOWNLOADER=curl APPWORLD_S3_IP=52.92.186.193 PYTHON=.venv/bin/python scripts/download_appworld_data.sh
-```
-
-AppWorld's GitHub archive contains Git LFS pointers for encrypted source
-bundles. Keep `external/appworld/src` as the untouched official archive
-extraction and materialize a separate runtime copy:
-
-```bash
-scripts/download_appworld_source_bundles.sh
-```
-
-EnterpriseOps-Gym source includes `gym_dbs.zip`, and task configs are loaded
-from the official Hugging Face dataset `ServiceNow-AI/EnterpriseOps-Gym` unless
-`benchmark.options.configs_folder` points to a local materialized config folder.
-Runtime execution also requires the official MCP Docker servers for the chosen
-domain to be running.
-
-Recommended setup keeps the official source checkout untouched and materializes
-task configs into our own cache:
-
-```bash
-# Needed for local parquet -> JSON materialization.
-.venv/bin/python -m pip install -e '.[enterpriseops-gym]'
-
-# wget/curl/hf paths all use official Hugging Face URLs.
-ENTERPRISEOPS_DOWNLOADER=wget scripts/download_enterpriseops_tasks.sh
-
-# If direct wget/curl to huggingface.co is blocked, either use the official
-# datasets API path or explicitly opt in to a Hugging Face mirror transport.
-ENTERPRISEOPS_DOWNLOADER=datasets scripts/download_enterpriseops_tasks.sh
-ENTERPRISEOPS_HF_BASE=https://hf-mirror.com/datasets \
-  ENTERPRISEOPS_ALLOW_MIRROR=1 \
-  ENTERPRISEOPS_DOWNLOADER=wget \
-  scripts/download_enterpriseops_tasks.sh
-
-# Start official MCP Docker servers for the selected domain(s).
-ENTERPRISEOPS_DOMAINS="teams" scripts/start_enterpriseops_gym_servers.sh
-
-# If Docker Hub direct pull is blocked, use a Docker Hub mirror transport.
-ENTERPRISEOPS_DOCKER_MIRROR_PREFIXES="docker.1ms.run hub.rat.dev" \
-  ENTERPRISEOPS_DOMAINS="teams" \
-  scripts/start_enterpriseops_gym_servers.sh
-
-# Override occupied host ports without changing official task configs.
-ENTERPRISEOPS_CSM_HOST_PORT=8011 \
-  ENTERPRISEOPS_DOMAINS="csm" \
-  scripts/start_enterpriseops_gym_servers.sh
-
-PYTHONPATH=src .venv/bin/python scripts/smoke_enterpriseops_gym.py \
-  --mcp-server-url-overrides csm=http://localhost:8011 sn-csm-server=http://localhost:8011
-```
-
-ClawsBench source is downloaded from the official repository, but the current
-official repo only contains the website and trajectory placeholders. Its README
-states that tasks will be added later, so the benchmark remains registered as
-`planned` until executable task/environment assets are released.
-
-Adapter implementation notes are in [docs/adapter_guide.md](docs/adapter_guide.md).
-New benchmark and agent integrations should normally be loaded through
-`benchmark.import_path` and `agent.import_path`, so group members can keep their
-adapter code outside the core registry.
-
-The minimal external adapter example is:
-
-- `examples/adapters/minimal_recovery_adapter.py`
-- `configs/external_minimal_adapter.example.toml`
-
-Run its conformance check:
-
-```bash
-PYTHONPATH=.:src .venv/bin/python -m recovery_bench.cli check-benchmark \
+PYTHONPATH=.:src python -m recovery_bench.cli check-benchmark \
   --config configs/external_minimal_adapter.example.toml
 ```
 
-Run its full retry/recovery suite:
+运行完整 suite：
 
 ```bash
-PYTHONPATH=.:src .venv/bin/python -m recovery_bench.cli suite \
+PYTHONPATH=.:src python -m recovery_bench.cli suite \
   --config configs/external_minimal_adapter.example.toml
 ```
 
-Example configs for the first real targets are in:
+## Adapter 接口
 
-- `configs/appworld.example.toml`
-- `configs/tau_bench.example.toml`
-- `configs/clawsbench.example.toml`
-- `configs/enterpriseops_gym.example.toml`
+新的 benchmark 实现 `BenchmarkAdapter`：
 
-Codex-backed OpenAI-compatible configs for the runnable first-wave targets are:
+```python
+class BenchmarkAdapter(Protocol):
+    name: str
 
-- `configs/appworld.codex_gpt55.toml`
-- `configs/tau_bench.codex_gpt55.toml`
-- `configs/enterpriseops_gym.codex_gpt55.toml`
-
-Claude Sonnet configs using `ANTHROPIC_AUTH_TOKEN` / `ANTHROPIC_BASE_URL` are:
-
-- `configs/appworld.claude_sonnet.toml`
-- `configs/tau_bench.claude_sonnet.toml`
-- `configs/enterpriseops_gym.claude_sonnet.toml`
-
-Claude Opus configs use the same Anthropic-compatible endpoint:
-
-- `configs/appworld.claude_opus.toml`
-- `configs/tau_bench.claude_opus.toml`
-- `configs/enterpriseops_gym.claude_opus.toml`
-
-The first benchmark wave is:
-
-- AppWorld
-- τ-bench
-- ClawsBench
-- EnterpriseOps-Gym
-
-## Agent Backends
-
-Provider-backed agents are configured through `[agent]` and `[model]`.
-
-Registered provider agents:
-
-- `openai-agent`: uses the OpenAI Responses API.
-- `anthropic-agent`: uses the Anthropic Messages API.
-- `gemini-agent`: uses the Google GenAI client.
-
-Provider SDKs and API keys are checked lazily. `list-agents` reports whether each provider is currently runnable without making smoke tests depend on those packages:
-
-```bash
-PYTHONPATH=src python3 -m recovery_bench.cli list-agents
+    def list_tasks(self) -> list[str]: ...
+    def load_task(self, task_id: str) -> Task: ...
+    def reset(self, task: Task) -> StateSnapshot: ...
+    def snapshot(self, *, label: str | None = None) -> StateSnapshot: ...
+    def restore(self, snapshot: StateSnapshot) -> StateSnapshot: ...
+    def agent_environment(self) -> Any: ...
+    def evaluate(self, task: Task) -> TaskOutcome: ...
+    def export_artifact(self, output_dir: Path, result: BenchmarkResult) -> None: ...
 ```
 
-`openai-agent` first uses standard `OPENAI_API_KEY` / `OPENAI_BASE_URL`.
-If those are not set, it can read Codex's local OpenAI-compatible settings from
-`~/.codex/auth.json` and `~/.codex/config.toml` without printing or storing the
-secret in run artifacts. The bundled `*.codex_gpt55.toml` configs use that path.
+新的 agent 实现 `AgentAdapter`：
 
-`anthropic-agent` uses the Anthropic SDK when installed. In this environment it
-can also call the Anthropic Messages API directly with `httpx` using
-`ANTHROPIC_API_KEY` or `ANTHROPIC_AUTH_TOKEN`, plus optional
-`ANTHROPIC_BASE_URL`.
+```python
+class AgentAdapter(Protocol):
+    name: str
 
-The generic provider agent does not guess benchmark action formats. It calls a benchmark-native bridge exposed by `benchmark.agent_environment()`, preferably `run_recovery_bench_agent(...)`. Implemented benchmark bridges:
+    def run(
+        self,
+        task: Task,
+        prompt: str,
+        environment: Any,
+        context: AgentContext,
+    ) -> AgentRunResult: ...
+```
 
-- AppWorld: model response -> Python code block -> `world.execute(code)`.
-- τ-bench: model response -> action string -> `env.step(action)`.
-- EnterpriseOps-Gym: model response -> JSON MCP tool call -> official MCP server.
+通过 TOML `import_path` 接入外部实现：
 
-Use `[agent.options]` for execution controls such as `max_steps`.
+```toml
+[benchmark]
+name = "my-benchmark"
+import_path = "my_package.my_benchmark_adapter:build_benchmark"
 
-τ-bench's official Gym flow also uses an LLM-backed user simulator. Set
-`benchmark.options.user_llm` to a LiteLLM model name; the adapter fills
-`user_llm_args` credentials from the local OpenAI/Codex or Anthropic env without
-writing secrets to artifacts. The closed-model configs use
-`anthropic/claude-sonnet-4-5` for this user simulator because the local OpenAI
-Chat Completions route is not available for the Codex `gpt-5.5` provider.
+[agent]
+name = "my-agent"
+import_path = "my_package.my_agent_adapter:build_agent"
+```
+
+推荐 factory 签名：
+
+```python
+def build_benchmark(config: BenchmarkConfig, task_ids: tuple[str, ...]) -> BenchmarkAdapter:
+    ...
+
+def build_agent(model_config: ModelConfig, agent_config: AgentConfig) -> AgentAdapter:
+    ...
+```
+
+更完整的接入说明见 [docs/adapter_guide.md](docs/adapter_guide.md)。
+
+## Conformance Check
+
+写完 adapter 后先跑基础契约检查：
+
+```bash
+PYTHONPATH=.:src python -m recovery_bench.cli check-benchmark \
+  --benchmark my-benchmark \
+  --benchmark-import-path my_package.my_benchmark_adapter:build_benchmark \
+  --task-id task_001
+```
+
+这个检查覆盖：
+
+- `list_tasks`
+- `load_task`
+- `reset`
+- `snapshot`
+- `restore`
+- `evaluate`
+- `capabilities`
+
+注意：conformance check 只检查基础生命周期，不等于证明 strict recovery 正确。真实 benchmark adapter 还需要自己增加状态一致性测试，确认失败状态、评分隔离、restore 后状态和官方 budget 都符合协议。

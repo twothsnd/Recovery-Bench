@@ -45,7 +45,7 @@ def test_benchmark_registry_can_build_external_import_path(monkeypatch) -> None:
     config = BenchmarkConfig(
         name="not-registered",
         import_path="tests_external_benchmark_plugin:build_benchmark",
-        options={"domain": "tb2"},
+        options={"domain": "example"},
     )
 
     adapter = BenchmarkRegistry().build("not-registered", config=config, task_ids=("task-9",))
@@ -67,7 +67,7 @@ def test_agent_registry_can_build_external_import_path(monkeypatch) -> None:
     module.build_agent = build_agent  # type: ignore[attr-defined]
     monkeypatch.setitem(sys.modules, module.__name__, module)
 
-    model_config = ModelConfig(name="qwen", provider="vllm")
+    model_config = ModelConfig(name="example-chat-model", provider="vllm")
     agent_config = AgentConfig(
         name="not-registered-agent",
         import_path="tests_external_agent_plugin:build_agent",
@@ -87,8 +87,7 @@ def test_agent_registry_can_build_external_import_path(monkeypatch) -> None:
 
 def test_real_benchmark_names_are_registered_with_dependency_status() -> None:
     rows = {name: status for name, status, _reason in default_benchmark_registry().describe()}
-    assert rows["appworld"] in {"available", "unavailable"}
-    assert rows["tau-bench"] in {"available", "unavailable"}
-    assert rows["enterpriseops-gym"] in {"available", "unavailable"}
-    assert rows["osworld"] in {"available", "unavailable"}
-    assert rows["clawsbench"] == "planned"
+    assert rows == {
+        "placeholder": "available",
+        "progress-smoke": "available",
+    }

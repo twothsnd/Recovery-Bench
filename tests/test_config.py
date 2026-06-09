@@ -46,13 +46,13 @@ domain = "desktop"
 
 [agent]
 name = "external-agent"
-import_path = "lab_agents.terminus:build_agent"
+import_path = "lab_agents.example_agent:build_agent"
 
 [agent.options]
 max_steps = 50
 
 [model]
-name = "qwen"
+name = "example-chat-model"
 provider = "vllm"
 """,
         encoding="utf-8",
@@ -62,9 +62,9 @@ provider = "vllm"
     config = spec.to_config()
 
     assert spec.benchmark_import_path == "lab_bench.adapters:build_benchmark"
-    assert spec.agent_import_path == "lab_agents.terminus:build_agent"
+    assert spec.agent_import_path == "lab_agents.example_agent:build_agent"
     assert config.benchmark.import_path == "lab_bench.adapters:build_benchmark"
-    assert config.agent.import_path == "lab_agents.terminus:build_agent"
+    assert config.agent.import_path == "lab_agents.example_agent:build_agent"
     assert config.benchmark.dataset_path == Path("external/lab-bench")
     assert config.benchmark.options == {"domain": "desktop"}
     assert config.agent.options == {"max_steps": 50}
@@ -73,17 +73,17 @@ provider = "vllm"
 def test_merge_spec_overrides_can_set_import_paths_without_registered_names() -> None:
     merged = merge_spec_overrides(
         None,
-        benchmark_name="tb2",
-        benchmark_import_path="tb2_recovery:build_benchmark",
-        agent_name="terminus2",
-        agent_import_path="harbor_recovery:build_agent",
-        model_name="terminus-model",
-        provider="harbor",
+        benchmark_name="external-benchmark",
+        benchmark_import_path="lab_benchmark:build_benchmark",
+        agent_name="external-agent",
+        agent_import_path="lab_agent:build_agent",
+        model_name="external-model",
+        provider="local",
     )
 
     config = merged.to_config()
 
-    assert config.benchmark.name == "tb2"
-    assert config.benchmark.import_path == "tb2_recovery:build_benchmark"
-    assert config.agent.name == "terminus2"
-    assert config.agent.import_path == "harbor_recovery:build_agent"
+    assert config.benchmark.name == "external-benchmark"
+    assert config.benchmark.import_path == "lab_benchmark:build_benchmark"
+    assert config.agent.name == "external-agent"
+    assert config.agent.import_path == "lab_agent:build_agent"

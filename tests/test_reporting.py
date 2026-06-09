@@ -18,10 +18,10 @@ def test_aggregate_results_groups_by_benchmark_model_protocol_and_k() -> None:
         ),
         success=True,
         k=3,
-        metadata={"benchmark": "AppWorld", "model": "GPT-4.1"},
+        metadata={"benchmark": "ExampleBench", "model": "ExampleModel"},
     )
     rows = aggregate_results([result])
     assert len(rows) == 1
-    assert rows[0].benchmark == "AppWorld"
-    assert rows[0].model == "GPT-4.1"
+    assert rows[0].benchmark == "ExampleBench"
+    assert rows[0].model == "ExampleModel"
     assert rows[0].protocol == "recovery"

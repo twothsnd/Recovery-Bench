@@ -149,11 +149,11 @@ def capabilities(self) -> AgentCapabilities:
         retry_memory_reset="new_agent_session",
         recovery_memory="same_agent_session_plus_previous_attempts",
         trajectory_export="action_records",
-        official_agent="terminus2",
+        official_agent="official-wrapper-agent",
     )
 ```
 
-`strict_recovery=True` 只能在恢复状态一致性可信时使用。比如 OSWorld 的 Docker live handle 可以跑通，但没有 VM checkpoint，因此不能标成 strict recovery。
+`strict_recovery=True` 只能在恢复状态一致性可信时使用。比如一个只保存 live handle、不能复原到精确失败状态的 adapter，即使能继续运行，也不能标成 strict recovery。
 
 ## 6. import_path 接入
 
@@ -161,12 +161,12 @@ def capabilities(self) -> AgentCapabilities:
 
 ```toml
 [benchmark]
-name = "tb2"
-import_path = "my_lab.tb2_adapter:build_benchmark"
+name = "my-benchmark"
+import_path = "my_lab.my_benchmark_adapter:build_benchmark"
 
 [agent]
-name = "terminus2"
-import_path = "my_lab.terminus_adapter:build_agent"
+name = "my-agent"
+import_path = "my_lab.my_agent_adapter:build_agent"
 ```
 
 factory 函数推荐签名：
@@ -214,8 +214,8 @@ PYTHONPATH=.:src .venv/bin/python -m recovery_bench.cli check-benchmark \
 
 ```bash
 PYTHONPATH=.:src .venv/bin/python -m recovery_bench.cli check-benchmark \
-  --benchmark tb2 \
-  --benchmark-import-path my_lab.tb2_adapter:build_benchmark \
+  --benchmark my-benchmark \
+  --benchmark-import-path my_lab.my_benchmark_adapter:build_benchmark \
   --task-id task_001
 ```
 
@@ -253,13 +253,13 @@ PYTHONPATH=.:src .venv/bin/python -m recovery_bench.cli check-benchmark \
 - artifact 是否记录足够的 action/observation/debug 信息；
 - `capabilities().strict_recovery` 是否和真实工程能力一致。
 
-## 10. TB2 / Harbor 这类 harness 怎么接
+## 10. 复杂 harness 怎么接
 
-Terminal-Bench 2 / Harbor / Terminus2 这类 benchmark 不应该把 harness 逻辑塞进 core。推荐拆法：
+带有独立 harness、容器、官方 agent loop 或 evaluator runner 的 benchmark，不应该把 harness 逻辑塞进 core。推荐拆法：
 
-- `TB2BenchmarkAdapter`：负责任务列表、容器/文件系统初始状态、checkpoint 或容器状态管理、官方 test/evaluator；
-- `Terminus2AgentAdapter`：负责调用 Harbor/Terminus2 的官方 agent loop；
+- `MyBenchmarkAdapter`：负责任务列表、容器/文件系统/数据库/VM 初始状态、checkpoint 或状态管理、官方 test/evaluator；
+- `MyAgentAdapter`：负责调用官方 agent loop 或实验室自己的 agent loop；
 - adapter 之间通过 `agent_environment()` 传递 official harness session 或 task runtime；
 - Recovery-Bench core 只负责决定什么时候 clean rerun、什么时候从 failed runtime state 继续。
 
-如果 Harbor 本身没有 strict checkpoint，需要 adapter 明确声明 `strict_recovery=False`，或者实现可验证的容器/filesystem snapshot。
+如果官方 harness 本身没有 strict checkpoint，需要 adapter 明确声明 `strict_recovery=False`，或者实现可验证的容器/filesystem/database/VM snapshot。
