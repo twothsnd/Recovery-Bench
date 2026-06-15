@@ -8,6 +8,16 @@ class FatalRunError(RuntimeError):
     """Fatal condition that should stop the whole benchmark run."""
 
 
+class TaskSkip(RuntimeError):
+    """Recoverable task-level condition that should not stop the full run."""
+
+    def __init__(self, task_id: str, reason: str, *, details: dict[str, Any] | None = None):
+        super().__init__(reason)
+        self.task_id = task_id
+        self.reason = reason
+        self.details = details or {}
+
+
 FATAL_STATUS_CODES = {401, 403}
 FATAL_MESSAGE_MARKERS = (
     "insufficient_quota",

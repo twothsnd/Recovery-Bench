@@ -19,9 +19,9 @@ task-image preparation, Docker state backend, and Terminus2 configuration.
 - Recovery patches the next attempt's task image to the previous failed
   attempt's committed pre-verifier image, then injects previous failed
   trajectories as Terminus2 memory.
-- Local dependency optimizations are enabled by default, matching the earlier TB2
-  runner: images are prebaked, package shims are installed, and a wheelhouse is
-  mounted when available.
+- Local preparation covers task image prebaking and Docker image pull policy.
+  Agent-attempt package installation and network behavior stay under the
+  official TB2/Terminus2 task environment.
 
 ## Requirements
 
@@ -47,15 +47,11 @@ The example config points at:
 Edit `configs/tb2_terminus2.local.example.toml` for the model name, API base,
 task list, and run directory.
 
-## Local Optimizations
+## Local Preparation
 
-The adapter can reuse the local engineering optimizations from the earlier TB2
-runner. They are enabled by default under `benchmark.options.local_optimization`.
+The adapter can prepare task images before the first clean attempt. This is
+configured under `benchmark.options.local_optimization`.
 
-- `build_wheelhouse="auto"` runs `scripts/build_wheelhouse.sh` when no local
-  wheel files are present under `wheelhouse/`.
-- `mount_wheelhouse` mounts the cache into Harbor task containers at
-  `/opt/tb2/wheelhouse`.
 - `prebake_images` runs `scripts/prebake_task_image.sh` before the first clean
   attempt for a task.
 - `mutate_original_images=true` commits prebake changes back into the active
@@ -63,13 +59,9 @@ runner. They are enabled by default under `benchmark.options.local_optimization`
 - `docker_mirror_prefix`, `docker_pull_retries`, and
   `docker_pull_total_timeout_sec` follow the earlier local pull policy.
 
-The package shims in `package_shims/` wrap `pip`, `uv`, `curl`, and `wget` to
-use local mirrors, wheelhouse lookup, and optional GitHub proxying. When these
-optimizations are enabled, their settings are recorded in benchmark
-capabilities and attempt snapshots.
-
-The example config sets `TB2_PREBAKE_MINI_SWE_AGENT=0`; Terminus2 does not need
-mini-swe-agent inside the task image.
+Prebake installs only the tools needed for Harbor/Terminus2 execution, currently
+`tmux` and optionally `asciinema` when missing. Package managers and runtime
+download commands remain the task image's own tools.
 
 ## Docker Backend
 

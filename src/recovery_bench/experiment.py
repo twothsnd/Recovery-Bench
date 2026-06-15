@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass, replace
 from pathlib import Path
 
+from .errors import TaskSkip
 from .io import dump_json, load_benchmark_result
 from .plugins import agent_capabilities, benchmark_capabilities
 from .protocol import ProtocolRunner
@@ -70,6 +71,7 @@ def build_manifest(runner: ProtocolRunner, results: list[BenchmarkResult]) -> di
             }
             for result in results
         ],
+        "skipped_tasks": list(runner.skipped_tasks),
     }
 
 
@@ -118,6 +120,9 @@ class ExperimentSuite:
             try:
                 task_results = self.runner.run_comparison_task(task_id, k=max_k)
                 results.extend(self._expand_k_values(task_results, k_values))
+                write_result_bundle(output_dir, self.runner, results)
+            except TaskSkip as exc:
+                self.runner._record_task_skip(exc)
                 write_result_bundle(output_dir, self.runner, results)
             finally:
                 self.runner._close_benchmark()

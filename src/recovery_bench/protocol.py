@@ -4,7 +4,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from .config import ExperimentConfig
-from .errors import raise_if_fatal_api_error
+from .errors import TaskSkip, raise_if_fatal_api_error
 from .plugins import agent_capabilities, benchmark_capabilities
 from .prompts import make_recovery_prompt, make_task_prompt
 from .types import (
@@ -29,6 +29,7 @@ class ProtocolRunner:
     agent: AgentAdapter
     config: ExperimentConfig
     artifacts: list[BenchmarkResult] = field(default_factory=list)
+    skipped_tasks: list[dict[str, object]] = field(default_factory=list)
 
     def run_all(self, mode: ProtocolMode, *, k: int) -> list[BenchmarkResult]:
         mode = ProtocolMode(mode)
@@ -37,6 +38,8 @@ class ProtocolRunner:
         for task_id in task_ids:
             try:
                 results.append(self.run_task(task_id, mode, k=k))
+            except TaskSkip as exc:
+                self._record_task_skip(exc)
             finally:
                 self._close_benchmark()
         self.artifacts.extend(results)
@@ -48,10 +51,21 @@ class ProtocolRunner:
         for task_id in task_ids:
             try:
                 results.extend(self.run_comparison_task(task_id, k=k))
+            except TaskSkip as exc:
+                self._record_task_skip(exc)
             finally:
                 self._close_benchmark()
         self.artifacts.extend(results)
         return results
+
+    def _record_task_skip(self, exc: TaskSkip) -> None:
+        self.skipped_tasks.append(
+            {
+                "task_id": exc.task_id,
+                "reason": exc.reason,
+                "details": exc.details,
+            }
+        )
 
     def run_comparison_task(self, task_id: str, *, k: int) -> tuple[BenchmarkResult, ...]:
         """Run Success@1 plus Retry/Recovery@k from one shared first attempt.
@@ -86,6 +100,25 @@ class ProtocolRunner:
 
         if k == 1:
             return (success_result,)
+
+        if first_attempt.status is AttemptStatus.ERROR:
+            retry_result = self._make_result(
+                task_id=task_id,
+                mode=ProtocolMode.RETRY,
+                k=k,
+                attempts=(first_attempt,),
+                success=False,
+                metadata={"comparison": "shared-first-attempt", "first_attempt_error": True},
+            )
+            recovery_result = self._make_result(
+                task_id=task_id,
+                mode=ProtocolMode.RECOVERY,
+                k=k,
+                attempts=(first_attempt,),
+                success=False,
+                metadata={"comparison": "shared-first-attempt", "first_attempt_error": True},
+            )
+            return (success_result, retry_result, recovery_result)
 
         if first_success:
             retry_result = self._make_result(
@@ -273,10 +306,16 @@ class ProtocolRunner:
             options=self.config.options,
         )
         agent_result = self._run_agent(task, prompt, context)
-        state_after = self.benchmark.snapshot(label=f"attempt-{attempt_index}-after")
-        outcome = self._evaluate(task)
-        if getattr(self.benchmark, "snapshot_after_evaluate", False):
-            state_after = self.benchmark.snapshot(label=f"attempt-{attempt_index}-after-evaluate")
+        state_after = None
+        outcome = TaskOutcome(
+            success=False,
+            details={"skipped_evaluation": "agent_error"},
+        )
+        if agent_result.error is None:
+            state_after = self.benchmark.snapshot(label=f"attempt-{attempt_index}-after")
+            outcome = self._evaluate(task)
+            if getattr(self.benchmark, "snapshot_after_evaluate", False):
+                state_after = self.benchmark.snapshot(label=f"attempt-{attempt_index}-after-evaluate")
         status = self._attempt_status(agent_result, outcome)
         return AttemptRecord(
             attempt_index=attempt_index,

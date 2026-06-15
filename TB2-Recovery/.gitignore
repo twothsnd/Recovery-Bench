@@ -6,6 +6,7 @@ cache/
 wheelhouse
 wheelhouse/
 wheelhouse.prev/
+tools/
 *.log
 *.pid
 .env

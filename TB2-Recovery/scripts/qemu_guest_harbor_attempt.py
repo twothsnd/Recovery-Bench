@@ -21,21 +21,6 @@ def _env_subset(keys: tuple[str, ...]) -> dict[str, str]:
     return {key: os.environ[key] for key in keys if os.environ.get(key)}
 
 
-def _wheelhouse_mounts() -> list[dict[str, Any]] | None:
-    wheelhouse = os.environ.get("TB2_WHEELHOUSE")
-    target = os.environ.get("TB2_WHEELHOUSE_IN_CONTAINER", "/opt/tb2/wheelhouse")
-    if not wheelhouse or not Path(wheelhouse).exists():
-        return None
-    return [
-        {
-            "type": "bind",
-            "source": str(Path(wheelhouse).resolve()),
-            "target": target,
-            "read_only": True,
-        }
-    ]
-
-
 async def _pre_verifier_barrier(ready_path: Path, done_path: Path, timeout_sec: int) -> None:
     ready_path.parent.mkdir(parents=True, exist_ok=True)
     ready_path.write_text(
@@ -78,19 +63,6 @@ async def _run(args: argparse.Namespace) -> Any:
             "no_proxy",
         )
     )
-    environment_env = _env_subset(
-        (
-            "PIP_INDEX_URL",
-            "PIP_TRUSTED_HOST",
-            "UV_INDEX_URL",
-            "UV_PYTHON_INSTALL_MIRROR",
-            "GH_PROXY",
-            "TB2_WHEELHOUSE",
-            "TB2_WHEELHOUSE_IN_CONTAINER",
-            "TB2_LOCAL_PKG_DELAY_SEC",
-        )
-    )
-
     config = TrialConfig(
         task=HarborTaskConfig(path=Path(args.task_path)),
         trial_name=args.trial_name,
@@ -103,8 +75,8 @@ async def _run(args: argparse.Namespace) -> Any:
         ),
         environment=HarborEnvironmentConfig(
             delete=False,
-            mounts_json=_wheelhouse_mounts(),
-            env=environment_env,
+            mounts_json=None,
+            env={},
         ),
         verifier=HarborVerifierConfig(disable=False),
     )

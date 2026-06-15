@@ -8,7 +8,7 @@
 
 - **Runtime need**：agent 做题时可能需要的外部依赖类型。
 - **Evidence**：来自 `instruction.md`、`README.md`、`solution/` 的证据。
-- **Routing**：更适合 wheelhouse/cache、镜像源、预拉固定资源，还是 task-aware dynamic routing。
+- **Routing**：更适合 PyPI cache、镜像源、预拉固定资源，还是 task-aware dynamic routing。
 - **Judgment**：对当前工程优化的意义。
 
 ## Tasks
@@ -66,8 +66,8 @@
   - `instruction.md`: explicitly requires `git clone --depth 1 --branch 0.5.3 https://github.com/SPOCKnots/pyknotid.git` to `/app/pyknotid`.
   - `README.md`: says internet access is enabled for cloning the repository.
   - `solution/solve.sh`: performs the GitHub clone, then installs `setuptools==80.9.0` and `cython==3.1.3` with pip, builds extensions, and runs `pip install -e .`.
-- **Routing**: Needs task-aware GitHub artifact cache/mirror for `SPOCKnots/pyknotid` at tag `0.5.3`, plus wheelhouse/PyPI mirror for build tools.
-- **Judgment**: This is not covered by generic wheelhouse alone because the source repository itself is required at runtime.
+- **Routing**: Needs task-aware GitHub artifact cache/mirror for `SPOCKnots/pyknotid` at tag `0.5.3`, plus PyPI mirror for build tools.
+- **Judgment**: This is not covered by generic PyPI cache alone because the source repository itself is required at runtime.
 
 ### `build-pmars`
 
@@ -143,7 +143,7 @@
   - `instruction.md`: only references local `chess_board.png` and asks for `/app/move.txt`.
   - `README.md`: suggests installing Stockfish and `python-chess`; the chess image is local.
   - `solution/solve.sh`: runs `apt install -y stockfish` and `pip3 install numpy==2.3.2 python-chess==1.2.0 --break-system-packages`.
-- **Routing**: APT cache/proxy for Stockfish and wheelhouse/PyPI mirror for Python packages.
+- **Routing**: APT cache/proxy for Stockfish and PyPI mirror for Python packages.
 - **Judgment**: No task-specific external data is needed; generic package caches cover the runtime network need.
 
 ### `circuit-fibsqrt`
@@ -200,7 +200,7 @@
   - `README.md`: says internet is required for downloading source and dependencies.
   - `solution/solve.sh`: installs system packages with APT, initializes OPAM, adds `https://coq.inria.fr/opam/released`, installs `coq.8.16.1` and `menhir.20230608`, then clones `https://github.com/AbsInt/CompCert.git` at tag `v3.13.1`.
 - **Routing**: APT cache/proxy, OPAM repository/package cache, and GitHub mirror/cache for AbsInt/CompCert.
-- **Judgment**: High runtime-network risk. This needs task-aware routing beyond generic Python wheelhouse.
+- **Judgment**: High runtime-network risk. This needs task-aware routing beyond generic Python PyPI cache.
 
 ### `configure-git-webserver`
 
@@ -412,8 +412,8 @@
   - `instruction.md`: input JPG/PDF documents are local under `/app/documents/`.
   - `README.md`: says Tesseract OCR must be installed by the agent and lists Python libraries such as `pytesseract`, PIL, PyMuPDF, and pandas.
   - `solution/solve.sh`: writes a Python script with inline `uv` dependencies including `opencv-python`, `pandas`, `pillow`, `pymupdf`, and `pytesseract`, installs `tesseract-ocr=5.3.4-1build5` with APT, then runs `uv run document_processor.py`.
-- **Routing**: APT cache/proxy for Tesseract and Python wheelhouse/PyPI mirror compatible with `uv`.
-- **Judgment**: Runtime network risk is package installation, not document download. The current wheelhouse should be checked against these OCR/PDF packages.
+- **Routing**: APT cache/proxy for Tesseract and Python PyPI mirror compatible with `uv`.
+- **Judgment**: Runtime network risk is package installation, not document download. Available package access should be checked against these OCR/PDF packages.
 
 ### `fix-code-vulnerability`
 
@@ -471,7 +471,7 @@
   - `instruction.md`: input `text.gcode` is local.
   - `README.md`: describes rendering and OCR; internet is allowed but the data is local.
   - `solution/solve.sh`: installs `python3-opencv`, `tesseract-ocr`, and `libtesseract-dev` with APT, and installs `matplotlib`, `pytesseract`, `pillow`, and `opencv-python` with pip.
-- **Routing**: APT cache/proxy plus wheelhouse/PyPI mirror for image/OCR packages.
+- **Routing**: APT cache/proxy plus PyPI mirror for image/OCR packages.
 - **Judgment**: Runtime network risk is dependency installation, not task data access.
 
 ### `git-leak-recovery`
@@ -544,7 +544,7 @@
   - `README.md`: transformers, torch, and flask are pre-installed; internet is enabled for model download.
   - `solution/solve.sh`: calls `AutoModelForSequenceClassification.from_pretrained(model_name)` and `AutoTokenizer.from_pretrained(model_name)`, then saves both locally.
 - **Routing**: HuggingFace cache/prepull for `distilbert-base-uncased-finetuned-sst-2-english`.
-- **Judgment**: Package wheelhouse is not the main issue; model artifact caching is required for reliable runs.
+- **Judgment**: Package PyPI cache is not the main issue; model artifact caching is required for reliable runs.
 
 ### `install-windows-3.11`
 
@@ -688,7 +688,7 @@
   - `README.md`: internet is allowed and required for CRAN package installation.
   - `solution/solve.sh`: installs `gfortran`, `liblapack-dev`, and `libblas-dev` with APT, then installs `remotes`, `Rcpp`, `RcppEigen`, `BH`, `StanHeaders`, and `rstan` from `https://cloud.r-project.org/`.
 - **Routing**: APT cache/proxy plus CRAN/R package cache for pinned RStan dependency versions.
-- **Judgment**: High runtime-network and build-risk task; generic Python wheelhouse does not help.
+- **Judgment**: High runtime-network and build-risk task; generic Python PyPI cache does not help.
 
 ### `merge-diff-arc-agi-task`
 
@@ -922,7 +922,7 @@
   - `README.md`: explicitly says the agent must query PDB, FPBase, and PubChem REST APIs; internet access is required.
   - `solution/solve.sh`: installs `biopython`, `rcsb-api`, `dnachisel`, `pandas`, and `requests`; uses RCSB sequence/search/data APIs, PubChem PUG REST, `https://www.rcsb.org/fasta/entry/.../download`, `https://data.rcsb.org/rest/v1/core/entry/...`, and `https://www.fpbase.org/api/proteins/...`.
 - **Routing**: Wheelhouse/PyPI mirror plus task-aware API/cache layer for RCSB, PubChem, and FPBase responses for the fixed input IDs/SMILES.
-- **Judgment**: High runtime-network risk. This is not solved by a generic wheelhouse; external scientific API access is part of the intended solution.
+- **Judgment**: High runtime-network risk. This is not solved by a generic PyPI cache; external scientific API access is part of the intended solution.
 
 ### `prove-plus-comm`
 
@@ -953,7 +953,7 @@
   - `instruction.md`: package and PyPI server are local, but tooling must be installed.
   - `README.md`: internet is enabled to install dependencies.
   - `solution/solve.sh`: installs `python3`, `python3-pip`, `python3-venv`, and `apache2-utils` with APT; installs `pypiserver`, `passlib[bcrypt]`, `bcrypt`, `packaging`, `build`, and `twine` with pip; then creates and serves a local package.
-- **Routing**: APT cache/proxy plus wheelhouse/PyPI mirror for server/build/upload tooling.
+- **Routing**: APT cache/proxy plus PyPI mirror for server/build/upload tooling.
 - **Judgment**: Runtime network risk is dependency installation, not external package data.
 
 ### `pytorch-model-cli`
@@ -1087,7 +1087,7 @@
   - `instruction.md`: sample C4 data is provided locally in `/app/c4_sample/`; required outputs are `/app/compress.py`, `/app/decompress.py`, and `/app/pyproject.toml`.
   - `README.md`: `uv` is pre-installed; tests run `uv sync`, but the scripts can be implemented with the Python standard library and an empty dependency set.
   - `solution/solve.sh`: writes local Python scripts. It imports `tqdm`, but the task semantics do not require downloading external datasets or models.
-- **Routing**: Prefer stdlib/no-dependency implementation. If an agent adds packages, route through wheelhouse/PyPI mirror via `uv sync`.
+- **Routing**: Prefer stdlib/no-dependency implementation. If an agent adds packages, route through PyPI mirror via `uv sync`.
 - **Judgment**: Local file transformation task. Runtime network risk is avoidable and comes from agent dependency choices, not task data.
 
 ### `rstan-to-pystan`
@@ -1110,7 +1110,7 @@
   - `instruction.md`: explicitly requires installing PyStan 3.10.0 and forbids R/RStan/cmdstan alternatives.
   - `README.md`: internet is required for package installation; key dependencies include PyStan 3.10.0, httpstan 4.13.0, pandas, and numpy.
   - `solution/solve.sh`: runs `apt-get`, adds `ppa:deadsnakes/ppa`, installs Python 3.10 build tooling, clones `https://github.com/stan-dev/httpstan.git`, builds it, then installs `pystan`, `pandas`, `numpy`, and `nest_asyncio` from PyPI.
-- **Routing**: Needs APT/PPA mirror coverage, GitHub mirror/cache for `stan-dev/httpstan`, and wheelhouse/PyPI mirror for PyStan/httpstan dependencies.
+- **Routing**: Needs APT/PPA mirror coverage, GitHub mirror/cache for `stan-dev/httpstan`, and PyPI mirror for PyStan/httpstan dependencies.
 - **Judgment**: High runtime-network risk. This task is package/build dominated before the modeling code can run.
 
 ### `sam-cell-seg`
@@ -1130,7 +1130,7 @@
   - `instruction.md`: requires using MobileSAM from `https://github.com/ChaoningZhang/MobileSAM` and writing a CPU-capable `/app/convert_masks.py`.
   - `README.md`: says the agent must install MobileSAM from the official GitHub repository; allowed runtime packages include `torch`, `torchvision`, `opencv-python`, `Pillow`, `tqdm`, and `mobile_sam`.
   - `solution/solve.sh`: installs `git`, `curl`, and `libgl1`; then installs CPU `torch`/`torchvision`, `pandas`, `timm`, `opencv-python`, and `git+https://github.com/ChaoningZhang/MobileSAM.git@34bbbfdface3c18e5221aa7de6032d7220c6c6a1`.
-- **Routing**: Needs APT mirror, PyTorch CPU wheel mirror/cache, PyPI wheelhouse, and GitHub mirror/cache for MobileSAM. The model weights are passed via `weights_path`; verifier-side weight download is outside the agent runtime inventory.
+- **Routing**: Needs APT mirror, PyTorch CPU wheel mirror/cache, PyPI cache, and GitHub mirror/cache for MobileSAM. The model weights are passed via `weights_path`; verifier-side weight download is outside the agent runtime inventory.
 - **Judgment**: High runtime-network risk from dependency installation and GitHub package install, even though demo image/CSV are local.
 
 ### `sanitize-git-repo`

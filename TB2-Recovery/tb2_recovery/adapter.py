@@ -17,6 +17,7 @@ from pathlib import Path
 from typing import Any
 
 from recovery_bench.config import AgentConfig, BenchmarkConfig, ModelConfig
+from recovery_bench.errors import TaskSkip
 from recovery_bench.io import dump_dataclass_json
 from recovery_bench.types import (
     ActionRecord,
@@ -147,12 +148,6 @@ def _with_llm_call_token_limit(options: dict[str, Any]) -> dict[str, Any]:
     return normalized
 
 
-def _build_wheelhouse_policy(value: Any) -> bool | str:
-    if isinstance(value, str) and value.strip().lower() == "auto":
-        return "auto"
-    return _as_bool(value)
-
-
 def _run_with_env(
     argv: list[str],
     *,
@@ -219,9 +214,6 @@ def _ensure_harbor_importable(harbor_bin: str | None = None, site_packages: str 
 @dataclass(slots=True)
 class LocalOptimizationConfig:
     enabled: bool = True
-    build_wheelhouse: bool | str = "auto"
-    mount_wheelhouse: bool = True
-    require_wheelhouse: bool = False
     prebake_images: bool = True
     mutate_original_images: bool = True
     pull_missing_images: bool = True
@@ -229,20 +221,35 @@ class LocalOptimizationConfig:
     docker_pull_retries: int = 3
     docker_pull_total_timeout_sec: int = 1800
     optimized_image_prefix: str = "tb2-local-opt"
-    wheelhouse_path: Path | None = None
-    wheelhouse_container_path: str = "/opt/tb2/wheelhouse"
-    build_wheelhouse_script: Path | None = None
     prebake_script: Path | None = None
     env: dict[str, str] = field(default_factory=dict)
 
-    def effective_wheelhouse(self, project_root: Path) -> Path:
-        return self.wheelhouse_path or (project_root / "wheelhouse")
-
-    def effective_build_script(self, project_root: Path) -> Path:
-        return self.build_wheelhouse_script or (project_root / "scripts" / "build_wheelhouse.sh")
-
     def effective_prebake_script(self, project_root: Path) -> Path:
         return self.prebake_script or (project_root / "scripts" / "prebake_task_image.sh")
+
+
+@dataclass(slots=True)
+class ContainerProxyConfig:
+    enabled: bool = False
+    http_proxy: str = ""
+    https_proxy: str = ""
+    no_proxy: str = "localhost,127.0.0.1,172.17.0.1,172.17.0.0/16"
+    env: dict[str, str] = field(default_factory=dict)
+
+    def as_env(self) -> dict[str, str]:
+        if not self.enabled:
+            return {}
+        env = dict(self.env)
+        if self.http_proxy:
+            env.setdefault("http_proxy", self.http_proxy)
+            env.setdefault("HTTP_PROXY", self.http_proxy)
+        if self.https_proxy:
+            env.setdefault("https_proxy", self.https_proxy)
+            env.setdefault("HTTPS_PROXY", self.https_proxy)
+        if self.no_proxy:
+            env.setdefault("no_proxy", self.no_proxy)
+            env.setdefault("NO_PROXY", self.no_proxy)
+        return env
 
 
 @dataclass(slots=True)
@@ -282,6 +289,7 @@ class TB2Benchmark:
     cleanup_recovery_images: bool = True
     state_backend: str = "docker_commit"
     local_optimization: LocalOptimizationConfig = field(default_factory=LocalOptimizationConfig)
+    container_proxy: ContainerProxyConfig = field(default_factory=ContainerProxyConfig)
     vm_snapshot: VMSnapshotConfig = field(default_factory=VMSnapshotConfig)
     session_id: str = field(default_factory=lambda: f"tb2-rb-{dt.datetime.now().strftime('%Y%m%d-%H%M%S')}-{os.getpid()}")
 
@@ -308,10 +316,6 @@ class TB2Benchmark:
         if self.state_backend == "strict_vm_command":
             self.vm_snapshot.enabled = True
         self.vm_snapshot.validate()
-        if self.local_optimization.wheelhouse_path is not None:
-            self.local_optimization.wheelhouse_path = self.local_optimization.wheelhouse_path.resolve()
-        if self.local_optimization.build_wheelhouse_script is not None:
-            self.local_optimization.build_wheelhouse_script = self.local_optimization.build_wheelhouse_script.resolve()
         if self.local_optimization.prebake_script is not None:
             self.local_optimization.prebake_script = self.local_optimization.prebake_script.resolve()
         self.work_dir.mkdir(parents=True, exist_ok=True)
@@ -405,6 +409,7 @@ class TB2Benchmark:
                 "snapshot": "vm_live_reference" if self.state_backend == "strict_vm_command" else "docker_image_reference",
                 "strict_point": "clean_vm_after_reset" if self.state_backend == "strict_vm_command" else "current_image",
                 "local_optimization": self._local_optimization_metadata(),
+                "container_proxy": self._container_proxy_metadata(),
             },
         )
 
@@ -457,6 +462,7 @@ class TB2Benchmark:
                 metadata={
                     "state_backend": self.state_backend,
                     "local_optimization": self._local_optimization_metadata(),
+                    "container_proxy": self._container_proxy_metadata(),
                     "vm_snapshot_enabled": False,
                 },
             )
@@ -476,6 +482,7 @@ class TB2Benchmark:
             metadata={
                 "state_backend": self.state_backend,
                 "local_optimization": self._local_optimization_metadata(),
+                "container_proxy": self._container_proxy_metadata(),
                 "vm_snapshot_enabled": self.vm_snapshot.enabled,
             },
         )
@@ -704,8 +711,6 @@ class TB2Benchmark:
             "parser_name": agent_options.get("parser_name", "json"),
             "temperature": agent_options.get("temperature", 0.7),
             "image": self.current_image or "",
-            "wheelhouse_path": self.local_optimization.effective_wheelhouse(self.project_root),
-            "wheelhouse_container_path": self.local_optimization.wheelhouse_container_path,
         }
 
     def _prepare_base_image(self, task: Task, image: str) -> str:
@@ -724,34 +729,13 @@ class TB2Benchmark:
         return optimized
 
     def _prepare_local_optimization_assets(self) -> None:
-        if not self.local_optimization.enabled:
-            return
-        policy = self.local_optimization.build_wheelhouse
-        should_build = policy is True or (policy == "auto" and not self._wheelhouse_ready())
-        if should_build:
-            script = self.local_optimization.effective_build_script(self.project_root)
-            if not script.exists():
-                raise FileNotFoundError(f"TB2 wheelhouse script not found: {script}")
-            env = self._local_optimization_env()
-            env.setdefault("TB2_WHEELHOUSE", str(self.local_optimization.effective_wheelhouse(self.project_root)))
-            _run_with_env(["bash", str(script)], env=env, check=True)
-
-    def _wheelhouse_ready(self) -> bool:
-        wheelhouse = self.local_optimization.effective_wheelhouse(self.project_root)
-        if not wheelhouse.exists():
-            return False
-        try:
-            next(wheelhouse.rglob("*.whl"))
-        except StopIteration:
-            return False
-        return True
+        return
 
     def _prebake_image(self, task: Task, image: str) -> str:
-        del task
         script = self.local_optimization.effective_prebake_script(self.project_root)
         if not script.exists():
             raise FileNotFoundError(f"TB2 prebake script not found: {script}")
-        self._ensure_image_available(image)
+        self._ensure_image_available(task, image)
 
         target_image = image
         if not self.local_optimization.mutate_original_images:
@@ -763,15 +747,18 @@ class TB2Benchmark:
                 _run(["docker", "tag", image, target_image], check=True)
 
         env = self._local_optimization_env()
-        env.setdefault("TB2_WHEELHOUSE", str(self.local_optimization.effective_wheelhouse(self.project_root)))
         _run_with_env(["bash", str(script), target_image], env=env, check=True)
         return target_image
 
-    def _ensure_image_available(self, image: str) -> None:
+    def _ensure_image_available(self, task: Task, image: str) -> None:
         if _docker_image_exists(image):
             return
         if not self.local_optimization.pull_missing_images:
-            raise RuntimeError(f"Docker image is missing and pull_missing_images=false: {image}")
+            raise TaskSkip(
+                task.task_id,
+                f"Docker image is missing and pull_missing_images=false: {image}",
+                details={"image": image, "stage": "docker_image_prepare"},
+            )
         refs = []
         mirror = self.local_optimization.docker_mirror_prefix.strip("/")
         if mirror:
@@ -792,58 +779,46 @@ class TB2Benchmark:
                 last_error = proc.stderr.strip() or proc.stdout.strip()
                 if attempt < self.local_optimization.docker_pull_retries:
                     time.sleep(min(30, 5 * attempt))
-        raise RuntimeError(f"could not pull Docker image {image}: {last_error}")
+        raise TaskSkip(
+            task.task_id,
+            f"could not pull Docker image {image}: {last_error}",
+            details={
+                "image": image,
+                "attempted_refs": refs,
+                "docker_pull_retries": self.local_optimization.docker_pull_retries,
+                "docker_pull_total_timeout_sec": self.local_optimization.docker_pull_total_timeout_sec,
+                "stage": "docker_image_pull",
+            },
+        )
 
     def _local_optimization_env(self) -> dict[str, str]:
-        env = dict(self.local_optimization.env)
-        if self.local_optimization.mount_wheelhouse or self.local_optimization.build_wheelhouse:
-            env.setdefault("TB2_WHEELHOUSE", str(self.local_optimization.effective_wheelhouse(self.project_root)))
-            env.setdefault("TB2_WHEELHOUSE_IN_CONTAINER", self.local_optimization.wheelhouse_container_path)
-        return env
+        return dict(self.local_optimization.env)
 
     def _local_optimization_metadata(self) -> dict[str, Any]:
         cfg = self.local_optimization
         return {
             "enabled": cfg.enabled,
-            "build_wheelhouse": cfg.build_wheelhouse,
-            "mount_wheelhouse": cfg.mount_wheelhouse,
-            "require_wheelhouse": cfg.require_wheelhouse,
             "prebake_images": cfg.prebake_images,
             "mutate_original_images": cfg.mutate_original_images,
             "pull_missing_images": cfg.pull_missing_images,
             "docker_mirror_prefix": cfg.docker_mirror_prefix,
             "docker_pull_retries": cfg.docker_pull_retries,
             "docker_pull_total_timeout_sec": cfg.docker_pull_total_timeout_sec,
-            "wheelhouse_path": str(cfg.effective_wheelhouse(self.project_root)) if cfg.enabled else None,
             "optimized_image_prefix": cfg.optimized_image_prefix if cfg.enabled else None,
         }
 
-    def _harbor_mounts(self) -> list[dict[str, Any]] | None:
-        cfg = self.local_optimization
-        if not cfg.enabled or not cfg.mount_wheelhouse:
-            return None
-        wheelhouse = cfg.effective_wheelhouse(self.project_root)
-        if not wheelhouse.exists():
-            if not cfg.require_wheelhouse:
-                return None
-            raise FileNotFoundError(
-                f"TB2 wheelhouse path does not exist: {wheelhouse}. "
-                "Run scripts/build_wheelhouse.sh or set build_wheelhouse=true."
-            )
-        return [
-            {
-                "type": "bind",
-                "source": str(wheelhouse),
-                "target": cfg.wheelhouse_container_path,
-                "read_only": True,
-            }
-        ]
+    def _container_proxy_env(self) -> dict[str, str]:
+        return self.container_proxy.as_env()
 
-    def _harbor_environment_env(self) -> dict[str, str]:
-        env = {}
-        if self.local_optimization.enabled:
-            env.update(self._local_optimization_env())
-        return env
+    def _container_proxy_metadata(self) -> dict[str, Any]:
+        cfg = self.container_proxy
+        return {
+            "enabled": cfg.enabled,
+            "http_proxy": cfg.http_proxy if cfg.enabled else None,
+            "https_proxy": cfg.https_proxy if cfg.enabled else None,
+            "no_proxy": cfg.no_proxy if cfg.enabled else None,
+            "extra_env_keys": sorted(cfg.env) if cfg.enabled else [],
+        }
 
     def _run_command_template(
         self,
@@ -879,8 +854,6 @@ class TB2Benchmark:
             "task_path": self.dataset_path / task.task_id,
             "task_dir": self.dataset_path / task.task_id,
             "image": image,
-            "wheelhouse_path": self.local_optimization.effective_wheelhouse(self.project_root),
-            "wheelhouse_container_path": self.local_optimization.wheelhouse_container_path,
         }
         self._run_command_template(
             self.vm_snapshot.reset_command,
@@ -1012,18 +985,15 @@ class TB2Benchmark:
             "llm_backend",
             "llm_kwargs",
             "llm_call_kwargs",
-            "dynamic_max_tokens",
-            "output_token_safety_margin",
         ):
             if key in agent_options:
                 kwargs[key] = agent_options[key]
 
-        # Terminus2 runs LLM calls in the Harbor host process, not inside the
-        # task tmux shell. Passing these values as Harbor agent env makes
-        # Terminus2 forward them with `tmux new-session -e`, which fails on
-        # older task images with tmux 3.1c. Keep model config in kwargs and
-        # host OPENAI_API_KEY only.
-        agent_env = {}
+        # Terminus2 runs LLM calls in the Harbor host process, while task
+        # commands run in the tmux shell. Only task-network variables go through
+        # Harbor agent env; Harbor forwards them to Terminus2 extra_env for tmux.
+        container_env = self._container_proxy_env()
+        agent_env = container_env
 
         config = TrialConfig(
             task=HarborTaskConfig(path=task_path),
@@ -1044,13 +1014,14 @@ class TB2Benchmark:
                 # attempt can restore from it. Plain `down` still cleans the
                 # trial containers while preserving the snapshot tag.
                 delete=False,
-                mounts_json=self._harbor_mounts(),
-                env=self._harbor_environment_env(),
+                mounts_json=None,
+                env=container_env,
             ),
             verifier=HarborVerifierConfig(
                 disable=False,
                 override_timeout_sec=agent_options.get("override_verifier_timeout_sec"),
                 max_timeout_sec=agent_options.get("max_verifier_timeout_sec"),
+                env=container_env,
             ),
         )
 
@@ -1380,6 +1351,7 @@ def build_benchmark(
     dataset_path = Path(str(config.dataset_path or options.pop("dataset_path", "external/terminal-bench-2"))) if config else Path("external/terminal-bench-2")
     project_root = Path(str(options.pop("project_root", "TB2-Recovery")))
     local_raw = dict(options.pop("local_optimization", {}) or {})
+    proxy_raw = dict(options.pop("container_proxy", {}) or {})
     vm_raw = dict(options.pop("vm_snapshot", {}) or {})
 
     def local_option(name: str, default: Any = None) -> Any:
@@ -1388,11 +1360,11 @@ def build_benchmark(
     def vm_option(name: str, default: Any = None) -> Any:
         return vm_raw.pop(name, options.pop(f"vm_{name}", options.pop(f"vm_snapshot_{name}", default)))
 
+    def proxy_option(name: str, default: Any = None) -> Any:
+        return proxy_raw.pop(name, options.pop(f"container_proxy_{name}", default))
+
     local_optimization = LocalOptimizationConfig(
         enabled=_as_bool(local_option("enabled", True), default=True),
-        build_wheelhouse=_build_wheelhouse_policy(local_option("build_wheelhouse", "auto")),
-        mount_wheelhouse=_as_bool(local_option("mount_wheelhouse", True), default=True),
-        require_wheelhouse=_as_bool(local_option("require_wheelhouse", False)),
         prebake_images=_as_bool(local_option("prebake_images", True), default=True),
         mutate_original_images=_as_bool(local_option("mutate_original_images", True), default=True),
         pull_missing_images=_as_bool(local_option("pull_missing_images", True), default=True),
@@ -1400,11 +1372,15 @@ def build_benchmark(
         docker_pull_retries=int(local_option("docker_pull_retries", 3)),
         docker_pull_total_timeout_sec=int(local_option("docker_pull_total_timeout_sec", 1800)),
         optimized_image_prefix=str(local_option("optimized_image_prefix", "tb2-local-opt")),
-        wheelhouse_path=_resolve_path(local_option("wheelhouse_path", None), base=project_root),
-        wheelhouse_container_path=str(local_option("wheelhouse_container_path", "/opt/tb2/wheelhouse")),
-        build_wheelhouse_script=_resolve_path(local_option("build_wheelhouse_script", None), base=project_root),
         prebake_script=_resolve_path(local_option("prebake_script", None), base=project_root),
         env=_str_dict(local_option("env", {})),
+    )
+    container_proxy = ContainerProxyConfig(
+        enabled=_as_bool(proxy_option("enabled", False), default=False),
+        http_proxy=str(proxy_option("http_proxy", "")),
+        https_proxy=str(proxy_option("https_proxy", "")),
+        no_proxy=str(proxy_option("no_proxy", "localhost,127.0.0.1,172.17.0.1,172.17.0.0/16")),
+        env=_str_dict(proxy_option("env", {})),
     )
     vm_snapshot = VMSnapshotConfig(
         enabled=_as_bool(vm_option("enabled", False)),
@@ -1425,6 +1401,7 @@ def build_benchmark(
         cleanup_recovery_images=_as_bool(options.pop("cleanup_recovery_images", True), default=True),
         state_backend=str(options.pop("state_backend", "docker_commit")),
         local_optimization=local_optimization,
+        container_proxy=container_proxy,
         vm_snapshot=vm_snapshot,
     )
 

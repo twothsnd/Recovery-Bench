@@ -4,24 +4,13 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 source "${ROOT}/env" 2>/dev/null || true
 
-PIP_INDEX_URL="${PIP_INDEX_URL:-https://mirrors.aliyun.com/pypi/simple/}"
-PIP_TRUSTED_HOST="${PIP_TRUSTED_HOST:-mirrors.aliyun.com}"
-UV_INDEX_URL="${UV_INDEX_URL:-$PIP_INDEX_URL}"
-UV_PYTHON_INSTALL_MIRROR="${UV_PYTHON_INSTALL_MIRROR:-https://mirrors.ustc.edu.cn/github-release/astral-sh/python-build-standalone/}"
 DEBIAN_MIRROR="${DEBIAN_MIRROR:-http://mirrors.aliyun.com/debian}"
 UBUNTU_MIRROR="${UBUNTU_MIRROR:-http://mirrors.aliyun.com/ubuntu}"
-MINI_SWE_AGENT_SPEC="${MINI_SWE_AGENT_SPEC:-mini-swe-agent}"
-GH_PROXY="${GH_PROXY:-https://gh-proxy.com}"
-UV_VERSION="${UV_VERSION:-0.7.13}"
 APT_UPDATE_TIMEOUT="${APT_UPDATE_TIMEOUT:-180}"
 APT_INSTALL_TIMEOUT="${APT_INSTALL_TIMEOUT:-600}"
-TB2_PREBAKE_REWRITE_APT_SOURCES="${TB2_PREBAKE_REWRITE_APT_SOURCES:-0}"
-TB2_PREBAKE_APT_MIRROR_FALLBACK="${TB2_PREBAKE_APT_MIRROR_FALLBACK:-1}"
-HOST_UV_BIN="${HOST_UV_BIN:-$(command -v uv || true)}"
-HOST_UVX_BIN="${HOST_UVX_BIN:-$(command -v uvx || true)}"
-TB2_PREBAKE_SYSTEM_DEPS="${TB2_PREBAKE_SYSTEM_DEPS:-0}"
-TB2_PREBAKE_MINI_SWE_AGENT="${TB2_PREBAKE_MINI_SWE_AGENT:-1}"
 TB2_PREBAKE_ASCIINEMA="${TB2_PREBAKE_ASCIINEMA:-1}"
+TB2_PREBAKE_ASCIINEMA_VERSION="${TB2_PREBAKE_ASCIINEMA_VERSION:-2.4.0}"
+TB2_PIP_DOWNLOAD_INDEX_URL="${TB2_PIP_DOWNLOAD_INDEX_URL:-${PIP_INDEX_URL:-}}"
 DEBIAN_BOOKWORM_LIBEVENT_DEB_URL="${DEBIAN_BOOKWORM_LIBEVENT_DEB_URL:-${DEBIAN_MIRROR%/}/pool/main/libe/libevent/libevent-core-2.1-7_2.1.12-stable-8_amd64.deb}"
 DEBIAN_BOOKWORM_LIBUTEMPTER_DEB_URL="${DEBIAN_BOOKWORM_LIBUTEMPTER_DEB_URL:-${DEBIAN_MIRROR%/}/pool/main/libu/libutempter/libutempter0_1.2.1-3_amd64.deb}"
 DEBIAN_BOOKWORM_TMUX_DEB_URL="${DEBIAN_BOOKWORM_TMUX_DEB_URL:-${DEBIAN_MIRROR%/}/pool/main/t/tmux/tmux_3.3a-3_amd64.deb}"
@@ -34,25 +23,14 @@ fi
 is_ready() {
   local image="$1"
   docker run --rm \
-    -e TB2_PREBAKE_MINI_SWE_AGENT="$TB2_PREBAKE_MINI_SWE_AGENT" \
     -e TB2_PREBAKE_ASCIINEMA="$TB2_PREBAKE_ASCIINEMA" \
     "$image" bash -lc '
     set -euo pipefail
     export PATH="/usr/local/bin:$HOME/.local/bin:$PATH"
-    command -v uv >/dev/null
-    command -v uvx >/dev/null
-    command -v pip >/dev/null
     command -v tmux >/dev/null
-    test -x /usr/local/bin/uv.real
-    test -x /usr/local/bin/curl
-    test -L /usr/bin/curl
     test -f /opt/tb2_recovery/.prebaked
-    if [[ "${TB2_PREBAKE_MINI_SWE_AGENT:-1}" == "1" ]]; then
-      command -v mini-swe-agent >/dev/null
-      mini-swe-agent --help >/dev/null 2>&1
-    fi
     if [[ "${TB2_PREBAKE_ASCIINEMA:-1}" == "1" ]]; then
-      test -x /usr/local/bin/asciinema
+      command -v asciinema >/dev/null
       asciinema --version >/dev/null 2>&1
     fi
   ' >/dev/null 2>&1
@@ -71,6 +49,52 @@ download_host_deb() {
   mv "$partial" "$output"
 }
 
+download_ubuntu_noble_prebake_debs() {
+  local mirror="${UBUNTU_MIRROR%/}"
+  local output_dir="$1"
+  mkdir -p "$output_dir"
+  local spec url file
+  while read -r spec; do
+    [[ -n "$spec" ]] || continue
+    url="${mirror}/${spec}"
+    file="${output_dir}/$(basename "$spec")"
+    download_host_deb "$url" "$file"
+  done <<'EOF'
+pool/main/libe/libevent/libevent-core-2.1-7t64_2.1.12-stable-9ubuntu2_amd64.deb
+pool/main/libu/libutempter/libutempter0_1.2.1-3build1_amd64.deb
+pool/main/t/tmux/tmux_3.4-1build1_amd64.deb
+pool/main/p/python3.12/libpython3.12-minimal_3.12.3-1ubuntu0.13_amd64.deb
+pool/main/e/expat/libexpat1_2.6.1-2ubuntu0.4_amd64.deb
+pool/main/p/python3.12/python3.12-minimal_3.12.3-1ubuntu0.13_amd64.deb
+pool/main/p/python3-defaults/python3-minimal_3.12.3-0ubuntu2.1_amd64.deb
+pool/main/m/media-types/media-types_10.1.0_all.deb
+pool/main/n/netbase/netbase_6.4_all.deb
+pool/main/t/tzdata/tzdata_2026a-0ubuntu0.24.04.1_all.deb
+pool/main/r/readline/readline-common_8.2-4build1_all.deb
+pool/main/r/readline/libreadline8t64_8.2-4build1_amd64.deb
+pool/main/s/sqlite3/libsqlite3-0_3.45.1-1ubuntu2.5_amd64.deb
+pool/main/p/python3.12/libpython3.12-stdlib_3.12.3-1ubuntu0.13_amd64.deb
+pool/main/p/python3.12/python3.12_3.12.3-1ubuntu0.13_amd64.deb
+pool/main/p/python3-defaults/libpython3-stdlib_3.12.3-0ubuntu2.1_amd64.deb
+pool/main/p/python3-defaults/python3_3.12.3-0ubuntu2.1_amd64.deb
+pool/main/s/setuptools/python3-pkg-resources_68.1.2-2ubuntu1.2_all.deb
+pool/universe/a/asciinema/asciinema_2.4.0-1_all.deb
+EOF
+}
+
+download_python_wheels() {
+  local output_dir="$1"
+  mkdir -p "$output_dir"
+  if compgen -G "${output_dir}/asciinema-${TB2_PREBAKE_ASCIINEMA_VERSION}-*.whl" >/dev/null; then
+    return 0
+  fi
+  local argv=(python -m pip download --only-binary=:all: --dest "$output_dir" "asciinema==${TB2_PREBAKE_ASCIINEMA_VERSION}")
+  if [[ -n "${TB2_PIP_DOWNLOAD_INDEX_URL}" ]]; then
+    argv+=(--index-url "$TB2_PIP_DOWNLOAD_INDEX_URL")
+  fi
+  "${argv[@]}"
+}
+
 install_one() {
   local image="$1"
   if is_ready "$image"; then
@@ -82,14 +106,11 @@ install_one() {
   docker rm -f "$tmp" >/dev/null 2>&1 || true
   docker create --name "$tmp" "$image" sleep infinity >/dev/null
   docker start "$tmp" >/dev/null
-  trap 'docker rm -f "$tmp" >/dev/null 2>&1 || true' RETURN
-
-  if [[ -x "$HOST_UV_BIN" ]]; then
-    docker cp "$HOST_UV_BIN" "${tmp}:/tmp/tb2_host_uv"
-  fi
-  if [[ -x "$HOST_UVX_BIN" ]]; then
-    docker cp "$HOST_UVX_BIN" "${tmp}:/tmp/tb2_host_uvx"
-  fi
+  cleanup_tmp() {
+    docker rm -f "$tmp" >/dev/null 2>&1 || true
+  }
+  trap cleanup_tmp RETURN
+  trap cleanup_tmp EXIT
 
   local host_deb_dir="${ROOT}/cache/debs/debian-bookworm"
   local host_libevent_deb="${host_deb_dir}/libevent-core-2.1-7_2.1.12-stable-8_amd64.deb"
@@ -102,24 +123,28 @@ install_one() {
     docker cp "$host_libutempter_deb" "${tmp}:/tmp/tb2_libutempter0.deb"
     docker cp "$host_tmux_deb" "${tmp}:/tmp/tb2_tmux.deb"
   fi
+  local host_ubuntu_noble_deb_dir="${ROOT}/cache/debs/ubuntu-noble"
+  if download_ubuntu_noble_prebake_debs "$host_ubuntu_noble_deb_dir"; then
+    docker exec -u root "$tmp" mkdir -p /tmp/tb2_ubuntu_noble_debs
+    for deb in "$host_ubuntu_noble_deb_dir"/*.deb; do
+      docker cp "$deb" "${tmp}:/tmp/tb2_ubuntu_noble_debs/$(basename "$deb")"
+    done
+  fi
+  local host_python_wheel_dir="${ROOT}/cache/python-wheels"
+  if [[ "${TB2_PREBAKE_ASCIINEMA}" == "1" ]] && download_python_wheels "$host_python_wheel_dir"; then
+    docker exec -u root "$tmp" mkdir -p /tmp/tb2_python_wheels
+    for wheel in "$host_python_wheel_dir"/*.whl; do
+      docker cp "$wheel" "${tmp}:/tmp/tb2_python_wheels/$(basename "$wheel")"
+    done
+  fi
 
   docker exec -u root \
-    -e PIP_INDEX_URL="$PIP_INDEX_URL" \
-    -e PIP_TRUSTED_HOST="$PIP_TRUSTED_HOST" \
-    -e UV_INDEX_URL="$UV_INDEX_URL" \
-    -e UV_PYTHON_INSTALL_MIRROR="$UV_PYTHON_INSTALL_MIRROR" \
     -e DEBIAN_MIRROR="$DEBIAN_MIRROR" \
     -e UBUNTU_MIRROR="$UBUNTU_MIRROR" \
-    -e MINI_SWE_AGENT_SPEC="$MINI_SWE_AGENT_SPEC" \
-    -e GH_PROXY="$GH_PROXY" \
-    -e UV_VERSION="$UV_VERSION" \
     -e APT_UPDATE_TIMEOUT="$APT_UPDATE_TIMEOUT" \
     -e APT_INSTALL_TIMEOUT="$APT_INSTALL_TIMEOUT" \
-    -e TB2_PREBAKE_REWRITE_APT_SOURCES="$TB2_PREBAKE_REWRITE_APT_SOURCES" \
-    -e TB2_PREBAKE_APT_MIRROR_FALLBACK="$TB2_PREBAKE_APT_MIRROR_FALLBACK" \
-    -e TB2_PREBAKE_SYSTEM_DEPS="$TB2_PREBAKE_SYSTEM_DEPS" \
-    -e TB2_PREBAKE_MINI_SWE_AGENT="$TB2_PREBAKE_MINI_SWE_AGENT" \
     -e TB2_PREBAKE_ASCIINEMA="$TB2_PREBAKE_ASCIINEMA" \
+    -e TB2_PREBAKE_ASCIINEMA_VERSION="$TB2_PREBAKE_ASCIINEMA_VERSION" \
     "$tmp" bash -lc '
 set -euo pipefail
 export DEBIAN_FRONTEND=noninteractive
@@ -142,84 +167,31 @@ apt_install() {
     install -y -qq --no-install-recommends "$@" >/dev/null
 }
 
-configure_apt_sources() {
-  if [[ "${TB2_PREBAKE_REWRITE_APT_SOURCES:-0}" != "1" ]]; then
-    return 0
-  fi
-  configure_mirror_apt_sources
-}
-
-disable_existing_apt_sources() {
-  mkdir -p /etc/apt/sources.list.d/tb2-recovery-disabled
-  if [[ -f /etc/apt/sources.list ]]; then
-    mv /etc/apt/sources.list /etc/apt/sources.list.d/tb2-recovery-disabled/sources.list.bak
-  fi
-  shopt -s nullglob
-  for source_file in /etc/apt/sources.list.d/*.list /etc/apt/sources.list.d/*.sources; do
-    case "$source_file" in
-      */tb2-recovery-*.list|*/tb2-recovery-*.sources) continue ;;
-      */tb2-recovery-disabled/*) continue ;;
-    esac
-    mv "$source_file" "/etc/apt/sources.list.d/tb2-recovery-disabled/$(basename "$source_file").bak"
-  done
-  shopt -u nullglob
-}
-
-configure_mirror_apt_sources() {
-  if [[ ! -f /etc/os-release ]]; then
-    return 0
-  fi
-  . /etc/os-release
-  codename="${VERSION_CODENAME:-bookworm}"
-  disable_existing_apt_sources
-  if [[ "${ID:-}" == "ubuntu" ]]; then
-    signed_by=""
-    if [[ -f /usr/share/keyrings/ubuntu-archive-keyring.gpg ]]; then
-      signed_by="Signed-By: /usr/share/keyrings/ubuntu-archive-keyring.gpg"
-    fi
-    cat >/etc/apt/sources.list.d/tb2-recovery-ubuntu.sources <<EOF
-Types: deb
-URIs: ${UBUNTU_MIRROR%/}/
-Suites: ${codename} ${codename}-updates ${codename}-backports
-Components: main universe restricted multiverse
-${signed_by}
-
-Types: deb
-URIs: ${UBUNTU_MIRROR%/}/
-Suites: ${codename}-security
-Components: main universe restricted multiverse
-${signed_by}
-EOF
-  else
-    cat >/etc/apt/sources.list <<EOF
-deb ${DEBIAN_MIRROR%/} ${codename} main contrib non-free
-deb ${DEBIAN_MIRROR%/} ${codename}-updates main contrib non-free
-EOF
-  fi
-}
-
-apt_update_with_fallback() {
-  if apt_update; then
-    return 0
-  fi
-  if [[ "${TB2_PREBAKE_APT_MIRROR_FALLBACK:-1}" != "1" ]]; then
-    return 1
-  fi
-  echo "apt update failed with existing sources; retrying with configured mirror sources" >&2
-  configure_mirror_apt_sources
-  apt_update
-}
-
 install_tmux_deb_fallback() {
   if [[ ! -f /etc/os-release ]]; then
     return 1
   fi
   . /etc/os-release
-  if [[ "${ID:-}" != "debian" || "${VERSION_CODENAME:-}" != "bookworm" ]]; then
-    return 1
-  fi
   local tmp_debs mirror
   tmp_debs="$(mktemp -d)"
+  if [[ "${ID:-}" == "ubuntu" && "${VERSION_CODENAME:-}" == "noble" ]]; then
+    if compgen -G "/tmp/tb2_ubuntu_noble_debs/*.deb" >/dev/null; then
+      cp /tmp/tb2_ubuntu_noble_debs/*.deb "$tmp_debs"/
+    else
+      rm -rf "${tmp_debs}"
+      return 1
+    fi
+    dpkg -i \
+      "${tmp_debs}/libevent-core-2.1-7t64_2.1.12-stable-9ubuntu2_amd64.deb" \
+      "${tmp_debs}/libutempter0_1.2.1-3build1_amd64.deb" \
+      "${tmp_debs}/tmux_3.4-1build1_amd64.deb" >/dev/null
+    rm -rf "${tmp_debs}"
+    return 0
+  fi
+  if [[ "${ID:-}" != "debian" || "${VERSION_CODENAME:-}" != "bookworm" ]]; then
+    rm -rf "${tmp_debs}"
+    return 1
+  fi
   if [[ -s /tmp/tb2_libevent_core.deb && -s /tmp/tb2_libutempter0.deb && -s /tmp/tb2_tmux.deb ]]; then
     cp /tmp/tb2_libevent_core.deb "${tmp_debs}/libevent-core.deb"
     cp /tmp/tb2_libutempter0.deb "${tmp_debs}/libutempter0.deb"
@@ -248,32 +220,73 @@ install_tmux_deb_fallback() {
   rm -rf "${tmp_debs}"
 }
 
-need_system_deps=0
-[[ "${TB2_PREBAKE_SYSTEM_DEPS}" == "1" ]] && need_system_deps=1
-command -v python3 >/dev/null 2>&1 || need_system_deps=1
-command -v pip >/dev/null 2>&1 || command -v pip3 >/dev/null 2>&1 || need_system_deps=1
-command -v curl >/dev/null 2>&1 || need_system_deps=1
-command -v wget >/dev/null 2>&1 || need_system_deps=1
-command -v git >/dev/null 2>&1 || need_system_deps=1
-if [[ "$need_system_deps" == "1" ]]; then
-if command -v apt-get >/dev/null 2>&1; then
-  configure_apt_sources
-  apt_update_with_fallback
-  apt_install bash ca-certificates curl wget git build-essential python3 python3-venv python3-pip tar gzip tmux
-elif command -v apk >/dev/null 2>&1; then
-  apk add --no-cache bash ca-certificates curl wget git build-base python3 py3-pip tmux >/dev/null
-elif command -v dnf >/dev/null 2>&1; then
-  dnf install -y bash ca-certificates curl wget git gcc gcc-c++ make python3 python3-pip tmux >/dev/null
-elif command -v yum >/dev/null 2>&1; then
-  yum install -y bash ca-certificates curl wget git gcc gcc-c++ make python3 python3-pip tmux >/dev/null
-fi
-fi
+install_asciinema_deb_fallback() {
+  if [[ ! -f /etc/os-release ]]; then
+    return 1
+  fi
+  . /etc/os-release
+  if [[ "${ID:-}" != "ubuntu" || "${VERSION_CODENAME:-}" != "noble" ]]; then
+    return 1
+  fi
+  local tmp_debs
+  tmp_debs="$(mktemp -d)"
+  if compgen -G "/tmp/tb2_ubuntu_noble_debs/*.deb" >/dev/null; then
+    cp /tmp/tb2_ubuntu_noble_debs/*.deb "$tmp_debs"/
+  else
+    rm -rf "${tmp_debs}"
+    return 1
+  fi
+  dpkg -i \
+    "${tmp_debs}/libpython3.12-minimal_3.12.3-1ubuntu0.13_amd64.deb" \
+    "${tmp_debs}/libexpat1_2.6.1-2ubuntu0.4_amd64.deb" \
+    "${tmp_debs}/python3.12-minimal_3.12.3-1ubuntu0.13_amd64.deb" >/dev/null
+  dpkg -i \
+    "${tmp_debs}/python3-minimal_3.12.3-0ubuntu2.1_amd64.deb" >/dev/null
+  dpkg -i \
+    "${tmp_debs}/media-types_10.1.0_all.deb" \
+    "${tmp_debs}/netbase_6.4_all.deb" \
+    "${tmp_debs}/tzdata_2026a-0ubuntu0.24.04.1_all.deb" \
+    "${tmp_debs}/readline-common_8.2-4build1_all.deb" \
+    "${tmp_debs}/libreadline8t64_8.2-4build1_amd64.deb" \
+    "${tmp_debs}/libsqlite3-0_3.45.1-1ubuntu2.5_amd64.deb" >/dev/null
+  dpkg -i \
+    "${tmp_debs}/libpython3.12-stdlib_3.12.3-1ubuntu0.13_amd64.deb" \
+    "${tmp_debs}/python3.12_3.12.3-1ubuntu0.13_amd64.deb" >/dev/null
+  dpkg -i \
+    "${tmp_debs}/libpython3-stdlib_3.12.3-0ubuntu2.1_amd64.deb" \
+    "${tmp_debs}/python3_3.12.3-0ubuntu2.1_amd64.deb" >/dev/null
+  dpkg -i \
+    "${tmp_debs}/python3-pkg-resources_68.1.2-2ubuntu1.2_all.deb" \
+    "${tmp_debs}/asciinema_2.4.0-1_all.deb" >/dev/null
+  rm -rf "${tmp_debs}"
+}
+
+install_asciinema_pip_fallback() {
+  if ! command -v python3 >/dev/null 2>&1; then
+    return 1
+  fi
+  if ! python3 -m pip --version >/dev/null 2>&1; then
+    return 1
+  fi
+  if ! compgen -G "/tmp/tb2_python_wheels/*.whl" >/dev/null; then
+    return 1
+  fi
+  python3 -m pip install \
+    --no-index \
+    --find-links /tmp/tb2_python_wheels \
+    --no-cache-dir \
+    --disable-pip-version-check \
+    "asciinema==${TB2_PREBAKE_ASCIINEMA_VERSION:-2.4.0}" >/dev/null
+}
 
 if ! command -v tmux >/dev/null 2>&1; then
 if command -v apt-get >/dev/null 2>&1; then
-  configure_apt_sources
-  apt_update_with_fallback
-  apt_install tmux || install_tmux_deb_fallback
+  if install_tmux_deb_fallback; then
+    :
+  else
+    apt_update
+    apt_install tmux
+  fi
 elif command -v apk >/dev/null 2>&1; then
   apk add --no-cache tmux >/dev/null
 elif command -v dnf >/dev/null 2>&1; then
@@ -283,148 +296,52 @@ elif command -v yum >/dev/null 2>&1; then
 fi
 fi
 
-mkdir -p /usr/local/bin /opt/tb2_recovery/shims /root/.local/bin
-
-install_uv_binary() {
-  if [[ -x /usr/local/bin/uv.real ]]; then
-    ln -sf /usr/local/bin/uv.real /usr/local/bin/uv
-    [[ -x /usr/local/bin/uvx.real ]] || ln -sf /usr/local/bin/uv.real /usr/local/bin/uvx.real
-    ln -sf /usr/local/bin/uvx.real /usr/local/bin/uvx
-    return 0
-  fi
-
-  local existing_uv
-  existing_uv="$(command -v uv || true)"
-  if [[ -n "$existing_uv" && "$existing_uv" != "/usr/local/bin/uv.real" ]]; then
-    cp -f "$existing_uv" /usr/local/bin/uv.real
-    chmod +x /usr/local/bin/uv.real
-  elif [[ -x /tmp/tb2_host_uv ]]; then
-    install -m 755 /tmp/tb2_host_uv /usr/local/bin/uv.real
-    if [[ -x /tmp/tb2_host_uvx ]]; then
-      install -m 755 /tmp/tb2_host_uvx /usr/local/bin/uvx.real
-    fi
-  else
-    local tmp_uv url
-    tmp_uv="$(mktemp -d)"
-    for url in \
-      "${GH_PROXY}/https://github.com/astral-sh/uv/releases/download/${UV_VERSION}/uv-x86_64-unknown-linux-gnu.tar.gz" \
-      "https://github.com/astral-sh/uv/releases/download/${UV_VERSION}/uv-x86_64-unknown-linux-gnu.tar.gz"
-    do
-      if curl -LfsS --retry 5 --connect-timeout 20 --max-time 180 "$url" -o "$tmp_uv/uv.tar.gz"; then
-        tar xzf "$tmp_uv/uv.tar.gz" -C "$tmp_uv"
-        install -m 755 "$tmp_uv"/uv-x86_64-unknown-linux-gnu/uv /usr/local/bin/uv.real
-        if [[ -x "$tmp_uv"/uv-x86_64-unknown-linux-gnu/uvx ]]; then
-          install -m 755 "$tmp_uv"/uv-x86_64-unknown-linux-gnu/uvx /usr/local/bin/uvx.real
-        fi
-        rm -rf "$tmp_uv"
-        break
-      fi
-    done
-    [[ -x /usr/local/bin/uv.real ]] || { echo "failed to install uv" >&2; return 1; }
-  fi
-
-  [[ -x /usr/local/bin/uvx.real ]] || ln -sf /usr/local/bin/uv.real /usr/local/bin/uvx.real
-  ln -sf /usr/local/bin/uv.real /usr/local/bin/uv
-  ln -sf /usr/local/bin/uvx.real /usr/local/bin/uvx
-}
-
-install_uv_binary
-export PATH="/usr/local/bin:/root/.local/bin:$PATH"
-export UV_INDEX_URL="${UV_INDEX_URL}"
-export PIP_INDEX_URL="${PIP_INDEX_URL}"
-export UV_PYTHON_INSTALL_MIRROR="${UV_PYTHON_INSTALL_MIRROR}"
-
-if [[ "${TB2_PREBAKE_MINI_SWE_AGENT}" == "1" ]] && ! command -v mini-swe-agent >/dev/null 2>&1; then
-  python_bin="$(command -v python3)"
-  uv tool install --python "$python_bin" "${MINI_SWE_AGENT_SPEC}"
-fi
-
 if [[ "${TB2_PREBAKE_ASCIINEMA}" == "1" ]] && ! command -v asciinema >/dev/null 2>&1; then
-  python_bin="$(command -v python3)"
-  uv tool install --python "$python_bin" asciinema
+if install_asciinema_pip_fallback; then
+  :
+elif command -v apt-get >/dev/null 2>&1; then
+  if install_asciinema_deb_fallback; then
+    :
+  else
+    apt_update
+    apt_install asciinema
+  fi
+elif command -v apk >/dev/null 2>&1; then
+  apk add --no-cache asciinema >/dev/null
+elif command -v dnf >/dev/null 2>&1; then
+  dnf install -y asciinema >/dev/null
+elif command -v yum >/dev/null 2>&1; then
+  yum install -y asciinema >/dev/null
+fi
 fi
 
-real_asciinema="$(command -v asciinema || true)"
-if [[ -n "$real_asciinema" && "$real_asciinema" != "/usr/local/bin/asciinema" ]]; then
-  ln -sf "$real_asciinema" /usr/local/bin/asciinema
-fi
+mkdir -p /opt/tb2_recovery
+rm -rf \
+  /tmp/tb2_ubuntu_noble_debs \
+  /tmp/tb2_python_wheels \
+  /tmp/tb2_libevent_core.deb \
+  /tmp/tb2_libutempter0.deb \
+  /tmp/tb2_tmux.deb
 
-real_mswe="$(command -v mini-swe-agent || true)"
-if [[ -n "$real_mswe" && "$real_mswe" != "/usr/local/bin/mini-swe-agent" ]]; then
-  ln -sf "$real_mswe" /usr/local/bin/mini-swe-agent
-fi
-
-if [[ -x /usr/local/bin/pip && ! -e /usr/local/bin/pip.real ]]; then
-  cp -f /usr/local/bin/pip /usr/local/bin/pip.real || true
-fi
-if [[ -x /usr/local/bin/pip3 && ! -e /usr/local/bin/pip3.real ]]; then
-  cp -f /usr/local/bin/pip3 /usr/local/bin/pip3.real || true
-fi
-if [[ -x /usr/local/bin/curl && ! -e /usr/local/bin/curl.real ]]; then
-  cp -f /usr/local/bin/curl /usr/local/bin/curl.real || true
-fi
-if [[ -x /usr/bin/curl && ! -e /usr/bin/curl.real ]]; then
-  cp -f /usr/bin/curl /usr/bin/curl.real || true
-fi
-if [[ -x /usr/local/bin/wget && ! -e /usr/local/bin/wget.real ]]; then
-  cp -f /usr/local/bin/wget /usr/local/bin/wget.real || true
-fi
-if [[ -x /usr/bin/wget && ! -e /usr/bin/wget.real ]]; then
-  cp -f /usr/bin/wget /usr/bin/wget.real || true
-fi
-
-cat >/etc/pip.conf <<EOF
-[global]
-index-url = ${PIP_INDEX_URL}
-trusted-host = ${PIP_TRUSTED_HOST}
-disable-pip-version-check = true
-progress-bar = off
-EOF
-
-cat >/etc/profile.d/tb2_recovery.sh <<EOF
-export PATH="/usr/local/bin:\$HOME/.local/bin:\$PATH"
-export PIP_INDEX_URL="${PIP_INDEX_URL}"
-export PIP_TRUSTED_HOST="${PIP_TRUSTED_HOST}"
-export UV_INDEX_URL="${UV_INDEX_URL}"
-export UV_PYTHON_INSTALL_MIRROR="${UV_PYTHON_INSTALL_MIRROR}"
-EOF
 '
 
-  docker cp "${ROOT}/package_shims/pip" "${tmp}:/opt/tb2_recovery/shims/pip"
-  docker cp "${ROOT}/package_shims/uv" "${tmp}:/opt/tb2_recovery/shims/uv"
-  docker cp "${ROOT}/package_shims/curl" "${tmp}:/opt/tb2_recovery/shims/curl"
-  docker cp "${ROOT}/package_shims/wget" "${tmp}:/opt/tb2_recovery/shims/wget"
-
   docker exec -u root \
-    -e TB2_PREBAKE_MINI_SWE_AGENT="$TB2_PREBAKE_MINI_SWE_AGENT" \
     -e TB2_PREBAKE_ASCIINEMA="$TB2_PREBAKE_ASCIINEMA" \
     "$tmp" bash -lc '
 set -euo pipefail
-chmod +x /opt/tb2_recovery/shims/*
-ln -sf /opt/tb2_recovery/shims/pip /usr/local/bin/pip
-ln -sf /opt/tb2_recovery/shims/pip /usr/local/bin/pip3
-ln -sf /opt/tb2_recovery/shims/uv /usr/local/bin/uv
-ln -sf /opt/tb2_recovery/shims/curl /usr/local/bin/curl
-ln -sf /opt/tb2_recovery/shims/curl /usr/bin/curl
-ln -sf /opt/tb2_recovery/shims/wget /usr/local/bin/wget
-ln -sf /opt/tb2_recovery/shims/wget /usr/bin/wget
 touch /opt/tb2_recovery/.prebaked
 export PATH="/usr/local/bin:$HOME/.local/bin:$PATH"
-if [[ "${TB2_PREBAKE_MINI_SWE_AGENT:-1}" == "1" ]]; then
-  mini-swe-agent --help >/dev/null
-fi
 if [[ "${TB2_PREBAKE_ASCIINEMA:-1}" == "1" ]]; then
-  test -x /usr/local/bin/asciinema
+  command -v asciinema >/dev/null
   asciinema --version >/dev/null
 fi
-uv --version >/dev/null
-uvx --version >/dev/null
 tmux -V >/dev/null
 '
 
   docker commit "$tmp" "$image" >/dev/null
   docker rm -f "$tmp" >/dev/null
   trap - RETURN
+  trap - EXIT
   echo "OK prebaked: $image"
 }
 

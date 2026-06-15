@@ -263,13 +263,6 @@ class QEMUProvider:
             "OPENAI_BASE_URL": args.api_base,
             "NO_PROXY": _env("NO_PROXY", "127.0.0.1,localhost,172.17.0.1,host.docker.internal"),
             "no_proxy": _env("no_proxy", _env("NO_PROXY", "127.0.0.1,localhost,172.17.0.1,host.docker.internal")),
-            "PIP_INDEX_URL": _env("PIP_INDEX_URL", ""),
-            "PIP_TRUSTED_HOST": _env("PIP_TRUSTED_HOST", ""),
-            "UV_INDEX_URL": _env("UV_INDEX_URL", ""),
-            "GH_PROXY": _env("GH_PROXY", ""),
-            "TB2_WHEELHOUSE": _env("TB2_QEMU_GUEST_WHEELHOUSE", _env("TB2_WHEELHOUSE", "")),
-            "TB2_WHEELHOUSE_IN_CONTAINER": _env("TB2_WHEELHOUSE_IN_CONTAINER", "/opt/tb2/wheelhouse"),
-            "TB2_LOCAL_PKG_DELAY_SEC": _env("TB2_LOCAL_PKG_DELAY_SEC", "5"),
         }
         exports = " ".join(f"{key}={shlex.quote(value)}" for key, value in env.items() if value)
         guest_python = _env("TB2_QEMU_GUEST_PYTHON", "python3")
