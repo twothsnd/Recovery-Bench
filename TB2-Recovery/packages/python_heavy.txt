@@ -1,0 +1,10 @@
+# Optional packages. Enable with TB2_WHEELHOUSE_HEAVY=1.
+torch
+torch==2.7.0
+torchvision
+torchaudio
+fasttext
+pystan
+mteb
+mteb==1.36.8
+sentence-transformers

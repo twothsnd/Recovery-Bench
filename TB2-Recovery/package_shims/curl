@@ -1,0 +1,56 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+emit_uv_install_script() {
+  cat <<'SH'
+#!/usr/bin/env sh
+set -eu
+mkdir -p "$HOME/.local/bin"
+if [ -x /usr/local/bin/uv.real ]; then
+  ln -sf /usr/local/bin/uv.real "$HOME/.local/bin/uv"
+fi
+if [ -x /usr/local/bin/uvx.real ]; then
+  ln -sf /usr/local/bin/uvx.real "$HOME/.local/bin/uvx"
+elif [ -x /usr/local/bin/uv.real ]; then
+  ln -sf /usr/local/bin/uv.real "$HOME/.local/bin/uvx"
+fi
+cat > "$HOME/.local/bin/env" <<'EOF'
+export PATH="$HOME/.local/bin:/usr/local/bin:$PATH"
+export UV_INDEX_URL="${UV_INDEX_URL:-https://mirrors.aliyun.com/pypi/simple/}"
+export PIP_INDEX_URL="${PIP_INDEX_URL:-https://mirrors.aliyun.com/pypi/simple/}"
+export PIP_TRUSTED_HOST="${PIP_TRUSTED_HOST:-mirrors.aliyun.com}"
+export UV_PYTHON_INSTALL_MIRROR="${UV_PYTHON_INSTALL_MIRROR:-https://mirrors.ustc.edu.cn/github-release/astral-sh/python-build-standalone/}"
+EOF
+SH
+}
+
+real="${REAL_CURL:-}"
+for c in "$real" /usr/local/bin/curl.real /usr/bin/curl.real /bin/curl.real /usr/bin/curl; do
+  [[ -n "$c" && -x "$c" ]] || continue
+  real="$c"
+  break
+done
+proxy="${GH_PROXY:-https://gh-proxy.com}"
+
+args=()
+for arg in "$@"; do
+  case "$arg" in
+    https://astral.sh/uv/*/install.sh|https://astral.sh/uv/install.sh)
+      emit_uv_install_script
+      exit 0
+      ;;
+    https://github.com/*|https://raw.githubusercontent.com/*|https://astral.sh/*)
+      args+=("${proxy}/${arg}")
+      ;;
+    *)
+      args+=("$arg")
+      ;;
+  esac
+done
+
+if [[ -n "$real" && -x "$real" ]]; then
+  exec "$real" "${args[@]}"
+fi
+
+echo "curl shim: ${real} not found" >&2
+exit 127

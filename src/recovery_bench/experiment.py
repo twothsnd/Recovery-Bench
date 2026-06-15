@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass, replace
 from pathlib import Path
 
-from .io import dump_json
+from .io import dump_json, load_benchmark_result
 from .plugins import agent_capabilities, benchmark_capabilities
 from .protocol import ProtocolRunner
 from .reporting import (
@@ -107,7 +107,14 @@ class ExperimentSuite:
     ) -> list[BenchmarkResult]:
         results: list[BenchmarkResult] = []
         task_ids = self.runner.config.task_ids or tuple(self.runner.benchmark.list_tasks())
+        resumed_results = load_complete_task_results(output_dir, task_ids=task_ids, k_values=k_values)
+        resumed_task_ids = set(resumed_results)
+
         for task_id in task_ids:
+            if task_id in resumed_task_ids:
+                results.extend(resumed_results[task_id])
+                self.runner.artifacts = list(results)
+                continue
             try:
                 task_results = self.runner.run_comparison_task(task_id, k=max_k)
                 results.extend(self._expand_k_values(task_results, k_values))
@@ -115,6 +122,8 @@ class ExperimentSuite:
             finally:
                 self.runner._close_benchmark()
         self.runner.artifacts = list(results)
+        if resumed_task_ids:
+            write_result_bundle(output_dir, self.runner, results)
         return results
 
     @staticmethod
@@ -140,6 +149,54 @@ class ExperimentSuite:
 
 def derive_results_at_k(results: list[BenchmarkResult], k: int) -> list[BenchmarkResult]:
     return [derive_result_at_k(result, k) for result in results]
+
+
+def load_complete_task_results(
+    output_dir: Path,
+    *,
+    task_ids: tuple[str, ...],
+    k_values: tuple[int, ...],
+) -> dict[str, list[BenchmarkResult]]:
+    """Load task-level complete incremental artifacts for resume.
+
+    Resume is intentionally task-level. A task is skipped only when all result
+    rows requested by this run already exist. Partially completed tasks are
+    rerun from scratch because retry/recovery state chains cannot be safely
+    spliced at attempt granularity.
+    """
+
+    artifact_dir = output_dir / "artifacts"
+    if not artifact_dir.is_dir():
+        return {}
+
+    loaded: dict[tuple[str, str, int], BenchmarkResult] = {}
+    for path in sorted(artifact_dir.glob("*.json")):
+        try:
+            result = load_benchmark_result(path)
+        except Exception:
+            continue
+        loaded[(result.task_id, result.protocol, result.k)] = result
+
+    complete: dict[str, list[BenchmarkResult]] = {}
+    for task_id in task_ids:
+        expected = _expected_result_keys(task_id, k_values)
+        if not all(key in loaded for key in expected):
+            continue
+        complete[task_id] = [loaded[key] for key in expected]
+    return complete
+
+
+def _expected_result_keys(task_id: str, k_values: tuple[int, ...]) -> list[tuple[str, str, int]]:
+    keys: list[tuple[str, str, int]] = []
+    if 1 in k_values:
+        keys.append((task_id, ProtocolMode.SUCCESS.value, 1))
+    for k in k_values:
+        if k > 1:
+            keys.append((task_id, ProtocolMode.RETRY.value, k))
+    for k in k_values:
+        if k > 1:
+            keys.append((task_id, ProtocolMode.RECOVERY.value, k))
+    return keys
 
 
 def derive_result_at_k(result: BenchmarkResult, k: int) -> BenchmarkResult:

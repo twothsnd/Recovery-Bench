@@ -1,0 +1,92 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+delay="${TB2_LOCAL_PKG_DELAY_SEC:-5}"
+wheelhouse="${TB2_WHEELHOUSE_IN_CONTAINER:-/opt/tb2/wheelhouse}"
+
+is_install=0
+for arg in "$@"; do
+  if [[ "$arg" == "install" ]]; then
+    is_install=1
+    break
+  fi
+done
+
+if [[ "$is_install" == "1" && "$delay" =~ ^[0-9]+$ && "$delay" -gt 0 ]]; then
+  sleep "$delay"
+fi
+
+export PIP_INDEX_URL="${PIP_INDEX_URL:-https://mirrors.aliyun.com/pypi/simple/}"
+export PIP_TRUSTED_HOST="${PIP_TRUSTED_HOST:-mirrors.aliyun.com}"
+export PIP_DISABLE_PIP_VERSION_CHECK="${PIP_DISABLE_PIP_VERSION_CHECK:-1}"
+export PIP_PROGRESS_BAR="${PIP_PROGRESS_BAR:-off}"
+
+install_extra=()
+
+has_arg() {
+  local needle="$1"
+  shift
+  for arg in "$@"; do
+    [[ "$arg" == "$needle" ]] && return 0
+  done
+  return 1
+}
+
+append_wheelhouse_links() {
+  [[ -d "$wheelhouse" ]] || return 0
+  for d in "$wheelhouse"/cp* "$wheelhouse"/universal; do
+    [[ -d "$d" ]] || continue
+    compgen -G "$d/*.whl" >/dev/null || continue
+    install_extra+=(--find-links "file://$d")
+  done
+}
+
+case " $* " in
+  *" --find-links "*|*" -f "*) ;;
+  *) append_wheelhouse_links ;;
+esac
+
+real_candidates=(
+  "${REAL_PIP:-}"
+  /usr/local/bin/pip.real
+  /usr/local/bin/pip3.real
+  /usr/bin/pip3
+  /usr/bin/pip
+)
+
+for real in "${real_candidates[@]}"; do
+  [[ -n "$real" && -x "$real" ]] || continue
+  final_args=()
+  break_system_packages=0
+  if [[ "$is_install" == "1" ]] \
+    && ! has_arg "--break-system-packages" "$@" \
+    && "$real" install --help 2>/dev/null | grep -q -- "--break-system-packages"; then
+    break_system_packages=1
+  fi
+  inserted=0
+  for arg in "$@"; do
+    final_args+=("$arg")
+    if [[ "$arg" == "install" && "$inserted" == "0" ]]; then
+      [[ "$break_system_packages" == "1" ]] && final_args+=(--break-system-packages)
+      final_args+=("${install_extra[@]}")
+      inserted=1
+    fi
+  done
+  exec "$real" "${final_args[@]}"
+done
+
+final_args=()
+inserted=0
+for arg in "$@"; do
+  final_args+=("$arg")
+  if [[ "$arg" == "install" && "$inserted" == "0" ]]; then
+    if [[ "$is_install" == "1" ]] \
+      && ! has_arg "--break-system-packages" "$@" \
+      && python3 -m pip install --help 2>/dev/null | grep -q -- "--break-system-packages"; then
+      final_args+=(--break-system-packages)
+    fi
+    final_args+=("${install_extra[@]}")
+    inserted=1
+  fi
+done
+exec python3 -m pip "${final_args[@]}"

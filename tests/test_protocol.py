@@ -126,6 +126,28 @@ def test_suite_does_not_rerun_recovery_when_shared_attempt_one_succeeds() -> Non
     assert len(rates[("recovery", 3)].attempts) == 1
 
 
+def test_incremental_suite_resumes_completed_tasks_without_rerunning_agent(tmp_path: Path) -> None:
+    first_results = ExperimentSuite(_runner()).run(k_values=(1, 2, 3), incremental_output_dir=tmp_path)
+    assert first_results
+
+    runner = ProtocolRunner(
+        benchmark=build_progress_smoke_benchmark(),
+        agent=ExplodingAgent(),
+        config=ExperimentConfig(
+            benchmark=BenchmarkConfig(name="progress-smoke"),
+            model=ModelConfig(name="smoke-model", provider="local"),
+            task_ids=("progress-1",),
+        ),
+    )
+
+    resumed_results = ExperimentSuite(runner).run(k_values=(1, 2, 3), incremental_output_dir=tmp_path)
+
+    assert len(resumed_results) == len(first_results)
+    assert {(result.task_id, result.protocol, result.k) for result in resumed_results} == {
+        (result.task_id, result.protocol, result.k) for result in first_results
+    }
+
+
 def test_retry_and_recovery_attempts_get_full_configured_step_budget() -> None:
     benchmark = StepBudgetBenchmark()
     agent = StepBudgetAgent(max_steps=50)
@@ -215,6 +237,19 @@ class FirstCallCompletesThenFailsAgent:
             return AgentRunResult(actions=(ActionRecord(action="finish-first-call"),))
         progress.append("prepared")
         return AgentRunResult(actions=(ActionRecord(action="prepare-only"),))
+
+
+class ExplodingAgent:
+    name = "exploding-agent"
+
+    def run(
+        self,
+        task: Task,
+        prompt: str,
+        environment: object,
+        context: AgentContext,
+    ) -> AgentRunResult:
+        raise AssertionError("resume should not rerun completed tasks")
 
 
 class StepBudgetBenchmark:

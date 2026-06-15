@@ -38,7 +38,7 @@ external/
 external_repos/
 data/
 tmp/
-tb2_recovery/
+/tb2_recovery/
 
 .env
 .env.*

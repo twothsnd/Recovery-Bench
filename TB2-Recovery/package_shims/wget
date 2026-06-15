@@ -1,0 +1,29 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+real="${REAL_WGET:-}"
+for c in "$real" /usr/local/bin/wget.real /usr/bin/wget.real /bin/wget.real /usr/bin/wget; do
+  [[ -n "$c" && -x "$c" ]] || continue
+  real="$c"
+  break
+done
+proxy="${GH_PROXY:-https://gh-proxy.com}"
+
+args=()
+for arg in "$@"; do
+  case "$arg" in
+    https://github.com/*|https://raw.githubusercontent.com/*|https://astral.sh/*)
+      args+=("${proxy}/${arg}")
+      ;;
+    *)
+      args+=("$arg")
+      ;;
+  esac
+done
+
+if [[ -n "$real" && -x "$real" ]]; then
+  exec "$real" "${args[@]}"
+fi
+
+echo "wget shim: ${real} not found" >&2
+exit 127
