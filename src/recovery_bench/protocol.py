@@ -235,6 +235,8 @@ class ProtocolRunner:
 
             if record.state_after is not None:
                 current_state = record.state_after
+            if record.status is AttemptStatus.ERROR:
+                break
             if self._attempt_succeeded(record):
                 success = True
                 break
@@ -261,6 +263,8 @@ class ProtocolRunner:
     def _run_agent(self, task: Task, prompt: str, context: AgentContext) -> AgentRunResult:
         try:
             return self.agent.run(task, prompt, self.benchmark.agent_environment(), context)
+        except TaskSkip:
+            raise
         except Exception as exc:
             raise_if_fatal_api_error(exc)
             return AgentRunResult(error=f"{type(exc).__name__}: {exc}")

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass, replace
 from pathlib import Path
 
@@ -107,28 +108,46 @@ class ExperimentSuite:
         max_k: int,
         output_dir: Path,
     ) -> list[BenchmarkResult]:
-        results: list[BenchmarkResult] = []
         task_ids = self.runner.config.task_ids or tuple(self.runner.benchmark.list_tasks())
         resumed_results = load_complete_task_results(output_dir, task_ids=task_ids, k_values=k_values)
         resumed_task_ids = set(resumed_results)
+        results_by_task: dict[str, list[BenchmarkResult]] = {
+            task_id: list(task_results)
+            for task_id, task_results in resumed_results.items()
+        }
 
         for task_id in task_ids:
             if task_id in resumed_task_ids:
-                results.extend(resumed_results[task_id])
-                self.runner.artifacts = list(results)
+                self.runner.artifacts = _flatten_task_results(task_ids, results_by_task)
                 continue
+            should_close = True
             try:
+                _progress(f"task_start task_id={task_id}")
                 task_results = self.runner.run_comparison_task(task_id, k=max_k)
-                results.extend(self._expand_k_values(task_results, k_values))
-                write_result_bundle(output_dir, self.runner, results)
+                results_by_task[task_id] = self._expand_k_values(task_results, k_values)
+                _progress(f"task_write_start task_id={task_id}")
+                write_result_bundle(output_dir, self.runner, _flatten_task_results(task_ids, results_by_task))
+                _progress(f"task_write_done task_id={task_id}")
             except TaskSkip as exc:
                 self.runner._record_task_skip(exc)
-                write_result_bundle(output_dir, self.runner, results)
+                _progress(f"task_skip task_id={exc.task_id} stage={exc.details.get('stage', '<unknown>')}")
+                if _is_task_selection_skip(exc):
+                    should_close = False
+                    continue
+                _progress(f"task_skip_write_start task_id={exc.task_id}")
+                write_result_bundle(output_dir, self.runner, _flatten_task_results(task_ids, results_by_task))
+                _progress(f"task_skip_write_done task_id={exc.task_id}")
             finally:
-                self.runner._close_benchmark()
+                if should_close:
+                    _progress(f"task_close_start task_id={task_id}")
+                    self.runner._close_benchmark()
+                    _progress(f"task_close_done task_id={task_id}")
+        results = _flatten_task_results(task_ids, results_by_task)
         self.runner.artifacts = list(results)
         if resumed_task_ids:
+            _progress("final_write_start")
             write_result_bundle(output_dir, self.runner, results)
+            _progress("final_write_done")
         return results
 
     @staticmethod
@@ -202,6 +221,25 @@ def _expected_result_keys(task_id: str, k_values: tuple[int, ...]) -> list[tuple
         if k > 1:
             keys.append((task_id, ProtocolMode.RECOVERY.value, k))
     return keys
+
+
+def _flatten_task_results(
+    task_ids: tuple[str, ...],
+    results_by_task: dict[str, list[BenchmarkResult]],
+) -> list[BenchmarkResult]:
+    results: list[BenchmarkResult] = []
+    for task_id in task_ids:
+        results.extend(results_by_task.get(task_id, ()))
+    return results
+
+
+def _is_task_selection_skip(exc: TaskSkip) -> bool:
+    return exc.details.get("stage") == "task_selection"
+
+
+def _progress(message: str) -> None:
+    if os.environ.get("RECOVERY_BENCH_PROGRESS"):
+        print(f"RECOVERY_BENCH_PROGRESS {message}", flush=True)
 
 
 def derive_result_at_k(result: BenchmarkResult, k: int) -> BenchmarkResult:

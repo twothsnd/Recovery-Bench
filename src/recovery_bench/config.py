@@ -3,7 +3,11 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
-import tomllib
+
+try:
+    import tomllib
+except ModuleNotFoundError:  # Python < 3.11; direct ExperimentConfig use does not need TOML parsing.
+    tomllib = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -93,6 +97,8 @@ class ExperimentSpec:
 
 
 def load_experiment_spec(path: Path) -> ExperimentSpec:
+    if tomllib is None:
+        raise RuntimeError("TOML config loading requires Python 3.11+ or the tomli package.")
     data = tomllib.loads(path.read_text(encoding="utf-8"))
     experiment = _table(data, "experiment")
     benchmark = _table(data, "benchmark")

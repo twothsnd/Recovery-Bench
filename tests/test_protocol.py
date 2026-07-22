@@ -4,6 +4,7 @@ from pathlib import Path
 from recovery_bench.adapters.smoke import build_progress_smoke_benchmark
 from recovery_bench.agents.smoke import ProgressSmokeAgent
 from recovery_bench.config import BenchmarkConfig, ExperimentConfig, ModelConfig
+from recovery_bench.errors import TaskSkip
 from recovery_bench.experiment import ExperimentSuite, build_manifest
 from recovery_bench.protocol import ProtocolRunner
 from recovery_bench.types import (
@@ -148,6 +149,56 @@ def test_incremental_suite_resumes_completed_tasks_without_rerunning_agent(tmp_p
     }
 
 
+def test_incremental_task_selection_skip_does_not_close_benchmark(tmp_path: Path) -> None:
+    benchmark = SelectionSkipBenchmark()
+    runner = ProtocolRunner(
+        benchmark=benchmark,
+        agent=SelectionSkipAgent(),
+        config=ExperimentConfig(
+            benchmark=BenchmarkConfig(name="selection-skip"),
+            model=ModelConfig(name="fake-model", provider="fake"),
+            task_ids=("skip-me", "done"),
+        ),
+    )
+
+    results = ExperimentSuite(runner).run(k_values=(1, 2, 3), incremental_output_dir=tmp_path)
+
+    assert runner.skipped_tasks == [
+        {
+            "task_id": "skip-me",
+            "reason": "explicit test skip",
+            "details": {"stage": "task_selection"},
+        }
+    ]
+    assert benchmark.close_calls == ["done"]
+    assert {result.task_id for result in results} == {"done"}
+
+
+def test_incremental_agent_task_skip_is_not_swallowed(tmp_path: Path) -> None:
+    benchmark = SelectionSkipBenchmark()
+    runner = ProtocolRunner(
+        benchmark=benchmark,
+        agent=AgentTaskSkipAgent(),
+        config=ExperimentConfig(
+            benchmark=BenchmarkConfig(name="agent-skip"),
+            model=ModelConfig(name="fake-model", provider="fake"),
+            task_ids=("done",),
+        ),
+    )
+
+    results = ExperimentSuite(runner).run(k_values=(1, 2, 3), incremental_output_dir=tmp_path)
+
+    assert results == []
+    assert runner.skipped_tasks == [
+        {
+            "task_id": "done",
+            "reason": "agent could not reach scorer",
+            "details": {"stage": "pre_verifier_snapshot"},
+        }
+    ]
+    assert benchmark.close_calls == ["done"]
+
+
 def test_retry_and_recovery_attempts_get_full_configured_step_budget() -> None:
     benchmark = StepBudgetBenchmark()
     agent = StepBudgetAgent(max_steps=50)
@@ -250,6 +301,78 @@ class ExplodingAgent:
         context: AgentContext,
     ) -> AgentRunResult:
         raise AssertionError("resume should not rerun completed tasks")
+
+
+class SelectionSkipBenchmark:
+    name = "selection-skip"
+
+    def __init__(self) -> None:
+        self.active_task: str | None = None
+        self.close_calls: list[str] = []
+
+    def list_tasks(self) -> list[str]:
+        return ["skip-me", "done"]
+
+    def load_task(self, task_id: str) -> Task:
+        if task_id == "skip-me":
+            raise TaskSkip(task_id, "explicit test skip", details={"stage": "task_selection"})
+        self.active_task = task_id
+        return Task(task_id=task_id, prompt="finish")
+
+    def reset(self, task: Task) -> StateSnapshot:
+        self.active_task = task.task_id
+        return self.snapshot(label="reset")
+
+    def restore(self, snapshot: StateSnapshot) -> StateSnapshot:
+        return self.snapshot(label="restore")
+
+    def snapshot(self, *, label: str | None = None) -> StateSnapshot:
+        return StateSnapshot(payload={"task": self.active_task}, label=label)
+
+    def agent_environment(self) -> "SelectionSkipBenchmark":
+        return self
+
+    def evaluate(self, task: Task) -> TaskOutcome:
+        return TaskOutcome(success=True)
+
+    def export_artifact(self, output_dir: Path, result: BenchmarkResult) -> None:
+        return None
+
+    def close(self) -> None:
+        if self.active_task is None:
+            raise AssertionError("task-selection skip must not close an inactive benchmark")
+        self.close_calls.append(self.active_task)
+        self.active_task = None
+
+
+class SelectionSkipAgent:
+    name = "selection-skip-agent"
+
+    def run(
+        self,
+        task: Task,
+        prompt: str,
+        environment: SelectionSkipBenchmark,
+        context: AgentContext,
+    ) -> AgentRunResult:
+        return AgentRunResult(actions=(ActionRecord(action=f"finish-{task.task_id}"),))
+
+
+class AgentTaskSkipAgent:
+    name = "agent-task-skip"
+
+    def run(
+        self,
+        task: Task,
+        prompt: str,
+        environment: SelectionSkipBenchmark,
+        context: AgentContext,
+    ) -> AgentRunResult:
+        raise TaskSkip(
+            task.task_id,
+            "agent could not reach scorer",
+            details={"stage": "pre_verifier_snapshot"},
+        )
 
 
 class StepBudgetBenchmark:
